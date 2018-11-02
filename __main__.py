@@ -18,9 +18,15 @@ def main():
 		os.path.join(dir, DATA[0]),
 		os.path.join(dir, DATA[1]),
 		first_unfreeze=143,
-		primary_epochs=50,
-		secondary_epochs=20
-	)(k=10)
+		primary_epochs=2,
+		secondary_epochs=2,
+		both_eyes_same_class=True,
+		plot=True
+	)(
+		k=10,
+		gp_split=0.3
+	)
+
 
 main()
 
