@@ -1,4 +1,5 @@
 import itertools
+import matplotlib.colors
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy as sp
@@ -8,45 +9,50 @@ import random
 
 from keras.layers import Dense, Flatten
 from keras.models import Sequential
-from keras.optimizers import SGD
-from keras.preprocessing.image import load_img
+from keras.optimizers import SGD, RMSprop
+from keras.preprocessing import image
 from keras.utils import Sequence, to_categorical
 
 
 class CV(object):
-	def __init__(self, base_model, train_dir, test_dir, first_unfreeze=0, primary_epochs=50, secondary_epochs=20, both_eyes_same_class=True, feature_size=1024, distance='cosine', plot=True, metric='AUC'):
+	def __init__(self, base_model, train_dir, test_dir, **kwargs):
 		self.base = base_model
-		self.first_unfreeze = first_unfreeze
 		self.base_weights = self.base.get_weights()
-		
 		self.input_size = base_model.input_shape[1:3]
 		if any(size is None for size in self.input_size):
 			self.input_size = (256, 256)
-		self.feature_size = feature_size
-		self.batch_size = 32
-		
+			
 		self.train_dir = train_dir
 		self.test_dir = test_dir
-		self.epochs1 = primary_epochs
-		self.epochs2 = secondary_epochs
-		self.eyes_same_class = both_eyes_same_class
-		self.dist = distance
-		self.plot = plot
-		if self.plot:
-			plt.ion()
-		self.metric = metric
+		
+		self.batch_size = kwargs.get('batch_size', 32)
+		self.dist = kwargs.get('distance', 'cosine')
+		self.epochs1 = kwargs.get('primary_epochs') or kwargs.get('top_epochs') or kwargs.get('epochs1') or kwargs.get('epochs', 50)
+		self.epochs2 = kwargs.get('secondary_epochs') or kwargs.get('unfrozen_epochs') or kwargs.get('epochs2', 20)
+		self.eyes_same_class = kwargs.get('both_eyes_same_class', True)
+		self.feature_size = kwargs.get('feature_size', 1024)
+		self.first_unfreeze = kwargs.get('first_unfreeze')
+		self.opt1 = kwargs.get('opt1') or kwargs.get('opt', 'rmsprop')
+		self.opt2 = kwargs.get('opt2', SGD(lr=0.0001, momentum=0.9))
+		self.plot = kwargs.get('plot', True)
 		
 		self.model = None
 		self.tv_split = self.gp_split = None
-		self.t_gen = self.v_gen = None
-		self.k = 0
 		self.n_classes = 0
-		
+		self.color = None
+
 	def __call__(self, *args, **kwargs):
 		return self.cross_validate(*args, **kwargs)
 
 	def cross_validate(self, k=10, gp_split=0.3):
-		self.k = k
+		if self.plot:
+			plt.ion()
+			colors = np.vstack((np.linspace(0, 1, k), [1] * k, [1] * k)).T
+
+		run_once = False
+		if k <= 1:
+			k = 2
+			run_once = True
 
 		# Count classes
 		self.n_classes = max(
@@ -57,59 +63,37 @@ class CV(object):
 		) + 1
 		print(f"Found {self.n_classes} classes.")
 
-		self.tv_split = CVSplit(self.train_dir, self.k)
+		self.tv_split = CVSplit(self.train_dir, k)
 		self.gp_split = RatioSplit(self.test_dir, gp_split)
-		
-		AUC = np.empty(self.k)
-		for i in range(self.k):
-			print(f"Fold {i+1}:")
-			
-			self._build_model()
-			
-			self.t_gen = LabeledImageGenerator(
-				self.tv_split[(x for x in range(self.k) if x != i)],
-				self.get_class_label,
-				self.n_classes,
-				target_size=self.input_size,
-				batch_size=self.batch_size
-			)
-			self.v_gen = LabeledImageGenerator(
-				self.tv_split[i],
-				self.get_class_label,
-				self.n_classes,
-				target_size=self.input_size,
-				batch_size=self.batch_size
-			)
-		
-			# Freeze base layers
-			for layer in self.base.layers:
-				layer.trainable = False
-			print("Training top layers:")
-			self._fit_model(epochs=self.epochs1, opt='rmsprop', loss='categorical_crossentropy')
 
-			# Unfreeze the last few base layers
-			for layer in self.base.layers[self.first_unfreeze:]:
-				layer.trainable = True
-			print("Training unfrozen layers:")
-			self._fit_model(epochs=self.epochs2, opt=SGD(lr=0.0001, momentum=0.9), loss='categorical_crossentropy')
+		evaluation = Evaluation()
+		for i in range(k):
+			print(f"Fold {i+1}:")
+
+			if self.plot:
+				self.color = matplotlib.colors.hsv_to_rgb(colors[i])
+
+			# Build and train the model
+			self._build_model()
+			self._train_model(i)
 		
 			# Remove softmax layer and evaluate model
-			print("Evaluating model:")
 			self._remove_top_from_model()
-			AUC[i] = self._evaluate_model()
-			print(f"AUC: {AUC[i]}")
+			self._evaluate_model(evaluation)
 		
 			# Clean up
 			for layer in self.base.layers:
 				layer.trainable = True
 			self.base.set_weights(self.base_weights)
 			
-		print(f"AUC (\u03BC \u00B1 \u03C3): {np.mean(AUC)} \u00B1 {np.std(AUC)}")
+			if run_once:
+				break
+		
+		print("Final evaluation:")
+		print(evaluation)
 		if self.plot:
 			plt.ioff()
 			plt.show()
-			
-		return np.mean(AUC), np.std(AUC)
 		
 	def get_class_label(self, cls_name):
 		if os.path.isfile(cls_name):
@@ -140,70 +124,134 @@ class CV(object):
 	def _remove_top_from_model(self):
 		self.model.pop()
 		
-	def _fit_model(self, epochs, opt='SGD', loss='categorical_crossentropy'):
-		self.model.compile(optimizer=opt, loss=loss)
-		self.model.fit_generator(
-			self.t_gen,
-			epochs=epochs,
-			validation_data=self.v_gen
+	def _train_model(self, step):
+		t_gen = LabeledImageGenerator(
+			self.tv_split[(x for x in range(len(self.tv_split)) if x != step)],
+			self.get_class_label,
+			self.n_classes,
+			target_size=self.input_size,
+			batch_size=self.batch_size
+		)
+		v_gen = LabeledImageGenerator(
+			self.tv_split[step],
+			self.get_class_label,
+			self.n_classes,
+			target_size=self.input_size,
+			batch_size=self.batch_size
 		)
 	
-	def _evaluate_model(self):
+		if self.first_unfreeze is not None:
+			# Freeze base layers
+			for layer in self.base.layers:
+				layer.trainable = False
+			print("Training top layers:")
+			self._fit_model(t_gen, v_gen, epochs=self.epochs1, opt=self.opt1, loss='categorical_crossentropy')
+
+			# Unfreeze the last few base layers
+			for layer in self.base.layers[self.first_unfreeze:]:
+				layer.trainable = True
+			print("Training unfrozen layers:")
+			self._fit_model(t_gen, v_gen, epochs=self.epochs2, opt=self.opt2, loss='categorical_crossentropy')
+		
+		else:
+			print("Training model:")
+			self._fit_model(t_gen, v_gen, epochs=self.epochs1, opt=self.opt1, loss='categorical_crossentropy')
+		
+	def _fit_model(self, t_gen, v_gen, epochs, opt='SGD', loss='categorical_crossentropy'):
+		self.model.compile(optimizer=opt, loss=loss, metrics=['accuracy'])
+		self.model.fit_generator(
+			t_gen,
+			epochs=epochs,
+			validation_data=v_gen
+		)
+	
+	def _evaluate_model(self, evaluation):
 		self.gp_split.shuffle()
 		g_gen = ImageGenerator(
 			self.gp_split['gallery'],
 			target_size=self.input_size,
-			batch_size=self.batch_size
+			batch_size=self.batch_size,
+			shuffle=False
 		)
 		p_gen = ImageGenerator(
 			self.gp_split['probe'],
 			target_size=self.input_size,
-			batch_size=self.batch_size
+			batch_size=self.batch_size,
+			shuffle=False
 		)
 		
 		# Get class labels
-		g_classes = [self.get_class_label(g) for g in self.gp_split[0]]
-		p_classes = [self.get_class_label(p) for p in self.gp_split[1]]
+		g_classes = [self.get_class_label(g) for g in self.gp_split['gallery']]
+		p_classes = [self.get_class_label(p) for p in self.gp_split['probe']]
 	
 		# rows = samples, columns = features
-		g_features = self.model.predict_generator(g_gen)
-		p_features = self.model.predict_generator(p_gen)
-				
+		print("Predicting gallery features:")
+		g_features = self.model.predict_generator(g_gen, verbose=1)
+		print("Predicting probe features:")
+		p_features = self.model.predict_generator(p_gen, verbose=1)
+		
+		same = np.array([
+			(g, p)
+			for (i, g) in enumerate(g_features)
+			for (j, p) in enumerate(p_features)
+			if g_classes[i] == p_classes[j]
+		])
+		diff = np.array([
+			(g, p)
+			for (i, g) in enumerate(g_features)
+			for (j, p) in enumerate(p_features)
+			if g_classes[i] != p_classes[j]
+		])
+						
 		# rows = gallery, columns = probe
-		dist_matrix = sp.spatial.distance.cdist(g_features, p_features, metric=self.dist)
+		dist_matrix = np.absolute(sp.spatial.distance.cdist(g_features, p_features, metric=self.dist))
+
+		# Get FAR and FRR
+		far, frr, threshold = self._error_rates(dist_matrix, g_classes, p_classes, return_threshold=True, n_points=1000)
 		
-		'''Testing code:
-		g_classes = [0, 1, 2, 2]
-		p_classes = [0, 0, 1, 1, 2, 2, 2]
-		dist_matrix = np.empty((len(g_classes), len(p_classes)))
-		for (i, row) in enumerate(dist_matrix):
-			for (j, col) in enumerate(dist_matrix[i]):
-				x = random.uniform(0, 0.3) if g_classes[i] == p_classes[j] else random.uniform(0.7, 1)
-				if random.random() < 0.2:
-					x = 1 - x
-				dist_matrix[i, j] = x
-		'''
-		
-		n_points = 100
-		frr = np.empty((len(dist_matrix), n_points))
-		far = np.empty((len(dist_matrix), n_points))
-		threshold = np.linspace(0, 1, n_points)
-		for (i, row) in enumerate(dist_matrix):
-			same = np.array([x for (j, x) in enumerate(row) if g_classes[i] == p_classes[j]])
-			diff = np.array([x for (j, x) in enumerate(row) if g_classes[i] != p_classes[j]])
-			
-			frr[i] = np.array([np.count_nonzero(same > t) / len(same) for t in threshold])
-			far[i] = np.array([np.count_nonzero(diff <= t) / len(diff) for t in threshold])
-		
-		x = far.mean(axis=0)
-		y = 1 - frr.mean(axis=0)
+		# EER
+		eer = self._compute_eer(far, frr)
+		print(f"EER: {eer}")
+		evaluation.eer.update(eer)
 		if self.plot:
-			self._draw(x, y, "FAR", "1 - FRR")
-		if self.metric.lower() == 'auc':
-			return sklearn.metrics.auc(x, y)
+			self._draw(threshold, far, "Threshold", "FAR", figure="EER")
+			self._draw(threshold, frr, "Threshold", "FRR", figure="EER")
 		
-	def _draw(self, x, y, xlabel=None, ylabel=None):
-		plt.plot(x, y)
+		# AUC
+		trr = 1 - frr
+		auc = sklearn.metrics.auc(far, trr)
+		print(f"AUC: {auc}")
+		evaluation.auc.update(auc)
+		if self.plot:
+			self._draw(far, trr, "FAR", "1 - FRR", figure="ROC Curve")
+	
+	@staticmethod
+	def _error_rates(dist_matrix, g_classes, p_classes, return_threshold=False, n_points=0):
+		if n_points:
+			threshold = np.linspace(dist_matrix.min(), dist_matrix.max(), n_points)
+		else:
+			threshold = np.unique(dist_matrix)
+		
+		same = np.array([d for ((g, p), d) in np.ndenumerate(dist_matrix) if g_classes[g] == p_classes[p]])
+		diff = np.array([d for ((g, p), d) in np.ndenumerate(dist_matrix) if g_classes[g] != p_classes[p]])
+			
+		far = np.array([np.count_nonzero(diff <= t) / len(diff) for t in threshold])
+		frr = np.array([np.count_nonzero(same > t) / len(same) for t in threshold])
+		
+		if return_threshold:
+			return far, frr, threshold
+		else:
+			return far, frr
+		
+	@staticmethod
+	def _compute_eer(far, frr):
+		# See https://math.stackexchange.com/questions/2987246/finding-the-y-coordinate-of-the-intersection-of-two-functions-when-all-x-coordin for explanation of below formulas
+		i = np.argwhere(np.diff(np.sign(far - frr))).flatten()[0]
+		return (far[i] * frr[i+1] - far[i+1] * frr[i]) / (far[i] - far[i+1] - frr[i] + frr[i+1])
+		
+	def _draw(self, x, y, xlabel=None, ylabel=None, figure=None, clear=False):
+		plt.figure(num=figure, clear=clear)
+		plt.plot(x, y, color=self.color)
 		if xlabel:
 			plt.xlabel(xlabel)
 		if ylabel:
@@ -253,6 +301,9 @@ class CVSplit(object):
 		except TypeError:
 			# Return multiple folds as a single flattened list
 			return list(itertools.chain.from_iterable(self.folds[i] for i in index))
+			
+	def __len__(self):
+		return len(self.folds)
 
 
 class RatioSplit(object):
@@ -264,7 +315,7 @@ class RatioSplit(object):
 		]
 		self.split = round(ratio * len(self.samples))
 		
-		print(f"Found {len(self.samples)} images. Placed {self.split} in gallery and {len(self.samples) - self.split} in probe.")
+		print(f"Found {len(self.samples)} images. Placing {self.split} in gallery and {len(self.samples) - self.split} in probe.")
 	
 	def __getitem__(self, index):
 		if index == 0 or isinstance(index, str) and index.lower() in ('g', 'gallery'):
@@ -279,11 +330,12 @@ class RatioSplit(object):
 
 
 class ImageGenerator(Sequence):
-	def __init__(self, data, target_size=(256, 256), batch_size=32):
+	def __init__(self, data, target_size=(256, 256), batch_size=32, shuffle=True):
 		self.data = data
 		self.target_size = target_size
 		self.batch_size = batch_size
 		self.batch = None
+		self.shuffle = shuffle
 		self.on_epoch_end()
 		
 	def __len__(self):
@@ -299,10 +351,15 @@ class ImageGenerator(Sequence):
 		self.batch = np.empty((size, *self.target_size, 3), dtype=float)
 	
 	def _read_sample(self, i, sample):
-		self.batch[i] = load_img(sample, target_size=self.target_size)
+		self.batch[i] = self._load_img(sample)
+		
+	def _load_img(self, sample):
+		x = image.load_img(sample, target_size=self.target_size)
+		return image.img_to_array(x) / 255
 		
 	def on_epoch_end(self):
-		random.shuffle(self.data)
+		if self.shuffle:
+			random.shuffle(self.data)
 		
 
 class LabeledImageGenerator(ImageGenerator):
@@ -318,6 +375,54 @@ class LabeledImageGenerator(ImageGenerator):
 		)
 
 	def _read_sample(self, i, sample):
-		self.batch[0][i] = load_img(sample, target_size=self.target_size)
+		self.batch[0][i] = self._load_img(sample)
 		self.batch[1][i] = to_categorical(self.class_f(sample), num_classes=self.n_classes, dtype=int)
+		
+		
+class Evaluation(object):
+	def __init__(self):
+		self.auc = Metric("AUC")
+		self.eer = Metric("EER")
+		
+	def __str__(self):
+		return "\n".join(str(metric) for metric in self.__dict__.values())
+		
+
+class Metric(object):
+	def __init__(self, name, values=None, ddof=0):
+		self.name = name
+		
+		self.mean = 0
+		self.var = 0
+		self.std = 0
+		
+		self._n = 0
+		self._s = 0
+		self._ddof = ddof
+		
+		if values is not None:
+			self.update(values)
+		
+	def __str__(self):
+		return f"{self.name} (\u03BC \u00B1 \u03C3): {self.mean} \u00B1 {self.std}"
+		
+	def __len__(self):
+		return self._n
+		
+	def update(self, values):
+		try:
+			for v in values:
+				self._update(v)
+		except TypeError:
+			self._update(values)
+		
+	def _update(self, value):
+		self._n += 1
+		
+		old_mean = self.mean
+		self.mean += (value - old_mean) / self._n
+		
+		self._s += (value - old_mean) * (value - self.mean)
+		self.var = self._s / (self._n - self._ddof) if self._n > self._ddof else 0
+		self.std = np.sqrt(self.var)
 
