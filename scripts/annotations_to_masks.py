@@ -22,7 +22,7 @@ def annotations_to_masks(source_dir, target_dir, save_type='json', **kwargs):
 		)
 	else:
 		logging.basicConfig(
-			filename=kwargs['logging_file'],
+			filename=kwargs['logging_file'] or f'{os.path.splitext(os.path.realpath(__file__))[0]}.log),
 			filemode=kwargs.get('logging_filemode', 'w'),
 			level=kwargs.get('logging_level', logging.WARNING),
 			format='[%(asctime)s] %(levelname)s: %(message)s',
@@ -107,5 +107,5 @@ def annotations_to_masks(source_dir, target_dir, save_type='json', **kwargs):
 if __name__ == '__main__':
 	source = os.path.join('/media', os.getlogin(), 'All Your Base', 'EyeZ', 'Rot', 'mag-peter-rot', 'SBVP_vessels')
 	target = os.path.join(source, '..', 'SBVP_with_masks')
-	annotations_to_masks(source, target, save_type=('numpy_full', 'img'), logging_level=logging.INFO, logging_file='/home/matej/EyeZ/scripts/annotations_to_masks.log')
+	annotations_to_masks(source, target, save_type=('numpy_full', 'img'), logging_level=logging.INFO, logging_file='')
 
