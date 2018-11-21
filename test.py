@@ -8,9 +8,10 @@ from cross_validate import *
 
 def main():
 	#test_roc()
-	test_eer()
+	#test_eer()
 	#test_eval()
 	#test_metric()
+	test_naming()
 
 
 def test_roc():
@@ -57,6 +58,13 @@ def test_metric(n_data=1000):
 	
 	e = Metric(data)
 	print(e)
+	
+	
+def test_naming():
+	from keras.applications import ResNet50
+	naming = 'ie_d_n'
+	cv = CV(ResNet50(), 'asdf', 'asdf', naming=naming)
+	print(cv.naming)
 
 
 if __name__ == '__main__':

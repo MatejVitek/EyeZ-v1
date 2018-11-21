@@ -2,10 +2,11 @@ import itertools
 import matplotlib.colors
 import matplotlib.pyplot as plt
 import numpy as np
-import scipy as sp
-import sklearn.metrics
 import os
 import random
+import re
+import scipy as sp
+import sklearn.metrics
 
 from keras.layers import Dense, Flatten
 from keras.models import Sequential
@@ -13,18 +14,29 @@ from keras.optimizers import SGD, RMSprop
 from keras.preprocessing import image
 from keras.utils import Sequence, to_categorical
 
+import utils
+
+
+L = 0
+R = 1
+C = 2
+U = 3
+
 
 class CV(object):
 	def __init__(self, base_model, train_dir, test_dir, **kwargs):
+		# Base model settings
 		self.base = base_model
 		self.base_weights = self.base.get_weights()
 		self.input_size = base_model.input_shape[1:3]
 		if any(size is None for size in self.input_size):
 			self.input_size = (256, 256)
 			
+		# Directories
 		self.train_dir = train_dir
 		self.test_dir = test_dir
 		
+		# Other settings
 		self.batch_size = kwargs.get('batch_size', 32)
 		self.dist = kwargs.get('distance', 'cosine')
 		self.epochs1 = kwargs.get('primary_epochs') or kwargs.get('top_epochs') or kwargs.get('epochs1') or kwargs.get('epochs', 50)
@@ -35,10 +47,60 @@ class CV(object):
 		self.opt1 = kwargs.get('opt1') or kwargs.get('opt', 'rmsprop')
 		self.opt2 = kwargs.get('opt2', SGD(lr=0.0001, momentum=0.9))
 		self.plot = kwargs.get('plot', True)
+
+		# Count classes
+		classes = [
+			int(max(re.findall(r'\d+', cls), key=len))
+			for d in (self.train_dir, self.test_dir)
+			for cls in os.listdir(d)
+			if os.path.isdir(os.path.join(d, cls))
+		]
+		self.min_id = min(classes)
+		if self.min_id not in (0, 1):
+			raise ValueError("Illegal classes: subject IDs should start at 0 or 1.")
+		self.n_classes = max(classes) + 1 - self.min_id
+		if not self.eyes_same_class:
+			self.n_classes *= 2
+		print(f"Found {self.n_classes} classes.")
 		
+		# File naming conventions
+		self.eyes = kwargs.get('eyes', r'LR')
+		self.directions = kwargs.get('directions', r'lrcu')
+		if isinstance(self.directions, dict):
+			self.directions = ''.join(
+				self.directions[d]
+				for d in (
+					L, 'left', 'Left', 'LEFT', 'l', 'L',
+					R, 'right', 'Right', 'RIGHT', 'r', 'R',
+					C, 'center', 'Center', 'CENTER', 'c', 'C',
+					U, 'up', 'Up', 'UP', 'u', 'U'
+				)
+				if d in self.directions.keys()
+			)
+		else:
+			self.directions = ''.join(self.directions)
+
+		if 'naming_re' in kwargs:
+			self.naming = kwargs['naming_re']
+		else:
+			if 'naming' in kwargs:
+				self.naming = kwargs['naming'].lower()
+			else:
+				self.naming = 'ie_d_n'
+			rep = {
+				'i': r'(?P<id>\d+)',
+				'e': rf'(?P<eye>[{self.eyes}])',
+				'd': rf'(?P<dir>[{self.directions}])',
+				'n': r'(?P<n>\d+)'
+			}
+			self.naming = utils.multi_replace(re.escape(self.naming), rep, True)
+		for pattern in (r'(?P<id>', r'(?P<eye>', r'(?P<dir>', r'(?P<n>'):
+			if pattern not in self.naming:
+				raise ValueError(f"Missing pattern {pattern} in naming regex.")
+		
+		# Non-initialized variables
 		self.model = None
 		self.tv_split = self.gp_split = None
-		self.n_classes = 0
 		self.color = None
 
 	def __call__(self, *args, **kwargs):
@@ -54,17 +116,8 @@ class CV(object):
 			k = 2
 			run_once = True
 
-		# Count classes
-		self.n_classes = max(
-			self.get_class_label(cls)
-			for d in (self.train_dir, self.test_dir)
-			for cls in os.listdir(d)
-			if os.path.isdir(os.path.join(d, cls))
-		) + 1
-		print(f"Found {self.n_classes} classes.")
-
-		self.tv_split = CVSplit(self.train_dir, k)
-		self.gp_split = RatioSplit(self.test_dir, gp_split)
+		self.tv_split = CVSplit(self.train_dir, k, self)
+		self.gp_split = RatioSplit(self.test_dir, gp_split, self)
 
 		evaluation = Evaluation()
 		for i in range(k):
@@ -95,17 +148,6 @@ class CV(object):
 			plt.ioff()
 			plt.show()
 		
-	def get_class_label(self, cls_name):
-		if os.path.isfile(cls_name):
-			cls_name = os.path.dirname(cls_name)
-		if os.path.isdir(cls_name):
-			cls_name = os.path.basename(cls_name)
-		cls_name = cls_name.split('_')
-		n = int(cls_name[0]) - 1
-		if self.eyes_same_class:
-			return n
-		return 2 * n if cls_name[1] in ('L', 'l') else 2 * n + 1
-	
 	def _build_model(self):
 		# Add own top layer(s)
 		self.model = Sequential()
@@ -127,14 +169,12 @@ class CV(object):
 	def _train_model(self, step):
 		t_gen = LabeledImageGenerator(
 			self.tv_split[(x for x in range(len(self.tv_split)) if x != step)],
-			self.get_class_label,
 			self.n_classes,
 			target_size=self.input_size,
 			batch_size=self.batch_size
 		)
 		v_gen = LabeledImageGenerator(
 			self.tv_split[step],
-			self.get_class_label,
 			self.n_classes,
 			target_size=self.input_size,
 			batch_size=self.batch_size
@@ -179,10 +219,6 @@ class CV(object):
 			batch_size=self.batch_size,
 			shuffle=False
 		)
-		
-		# Get class labels
-		g_classes = [self.get_class_label(g) for g in self.gp_split['gallery']]
-		p_classes = [self.get_class_label(p) for p in self.gp_split['probe']]
 	
 		# rows = samples, columns = features
 		print("Predicting gallery features:")
@@ -190,17 +226,20 @@ class CV(object):
 		print("Predicting probe features:")
 		p_features = self.model.predict_generator(p_gen, verbose=1)
 		
+		g_classes = [s.label for s in self.gp_split['gallery']]
+		p_classes = [s.label for s in self.gp_split['probe']]
+		
 		same = np.array([
 			(g, p)
-			for (i, g) in enumerate(g_features)
-			for (j, p) in enumerate(p_features)
-			if g_classes[i] == p_classes[j]
+			for (g, g_cls) in zip(g_features, g_classes)
+			for (p, p_cls) in zip(p_features, p_classes)
+			if g_cls == p_cls
 		])
 		diff = np.array([
 			(g, p)
-			for (i, g) in enumerate(g_features)
-			for (j, p) in enumerate(p_features)
-			if g_classes[i] != p_classes[j]
+			for (g, g_cls) in zip(g_features, g_classes)
+			for (p, p_cls) in zip(p_features, p_classes)
+			if g_cls != p_cls
 		])
 						
 		# rows = gallery, columns = probe
@@ -260,39 +299,48 @@ class CV(object):
 		plt.pause(1)
 		
 		
+class Sample(object):
+	def __init__(self, f, info):
+		self.file = f
+		self.basename = os.path.basename(os.path.splitext(self.file)[0])
+		match = re.match(info.naming, self.basename)
+		self.id = int(match.group('id'))
+		self.eye = info.eyes.index(match.group('eye'))
+		self.direction = info.directions.index(match.group('dir'))
+		self.n = int(match.group('n'))
+		
+		id_norm = self.id - info.min_id
+		if info.eyes_same_class:
+			self.label = id_norm
+		else:
+			self.label = 2 * id_norm if self.direction == L else 2 * id_norm + 1
+		
+		
 class CVSplit(object):
-	def __init__(self, dir, n_folds, all_dirs_same_fold=True):
+	def __init__(self, dir, n_folds, info, all_dirs_same_fold=True):
 		# Read samples
-		samples = list({
-			os.path.join(dir, cls_dir, self._get_image_name(sample, all_dirs_same_fold))
+		samples = [
+			Sample(os.path.join(dir, cls_dir, sample), info)
 			for cls_dir in os.listdir(dir)
 			if os.path.isdir(os.path.join(dir, cls_dir))
 			for sample in os.listdir(os.path.join(dir, cls_dir))
 			if os.path.isfile(os.path.join(dir, cls_dir, sample))
-		})
-			
+		]
+		
 		# Shuffle and split sample list
-		random.shuffle(samples)
-		self.folds = np.array_split(samples, n_folds)
-		
-		# Expand list of samples with different directions
 		if all_dirs_same_fold:
-			for (i, fold) in enumerate(self.folds):
-				self.folds[i] = [
-					sample.format(direction)
-					for sample in fold
-					for direction in 'lrsu'
-					if os.path.isfile(sample.format(direction))
-				]
+			key = lambda s: (s.id, s.eye, s.n)
+			samples.sort(key=key)
+			groups = [list(g) for _, g in itertools.groupby(samples, key)]
+			for group in groups:
+				random.shuffle(group)
+			random.shuffle(groups)
+			self.folds = [[sample for group in fold for sample in group] for fold in np.array_split(groups, n_folds)]
+		else:
+			random.shuffle(samples)
+			self.folds = np.array_split(samples, n_folds)
 		
-		print(f"Found {sum(len(fold) for fold in self.folds)} images.")
-		
-	def _get_image_name(self, name, all_dirs_same_fold):
-		if not all_dirs_same_fold:
-			return name
-		name = name.split('_')
-		name[1] = '{}'
-		return '_'.join(name)
+		print(f"Found {sum(map(len, self.folds))} images.")
 		
 	def __getitem__(self, index):
 		try:
@@ -307,11 +355,13 @@ class CVSplit(object):
 
 
 class RatioSplit(object):
-	def __init__(self, dir, ratio):
+	def __init__(self, dir, ratio, info):
 		self.samples = [
-			os.path.join(dir, cls_dir, s)
-			for cls_dir in os.listdir(dir) if os.path.isdir(os.path.join(dir, cls_dir))
-			for s in os.listdir(os.path.join(dir, cls_dir))
+			Sample(os.path.join(dir, cls_dir, sample), info)
+			for cls_dir in os.listdir(dir)
+			if os.path.isdir(os.path.join(dir, cls_dir))
+			for sample in os.listdir(os.path.join(dir, cls_dir))
+			if os.path.isfile(os.path.join(dir, cls_dir, sample))
 		]
 		self.split = round(ratio * len(self.samples))
 		
@@ -351,10 +401,10 @@ class ImageGenerator(Sequence):
 		self.batch = np.empty((size, *self.target_size, 3), dtype=float)
 	
 	def _read_sample(self, i, sample):
-		self.batch[i] = self._load_img(sample)
+		self.batch[i] = self._load_img(sample.file)
 		
-	def _load_img(self, sample):
-		x = image.load_img(sample, target_size=self.target_size)
+	def _load_img(self, f):
+		x = image.load_img(f, target_size=self.target_size)
 		return image.img_to_array(x) / 255
 		
 	def on_epoch_end(self):
@@ -363,9 +413,8 @@ class ImageGenerator(Sequence):
 		
 
 class LabeledImageGenerator(ImageGenerator):
-	def __init__(self, data, class_f, n_classes, *args, **kwargs):
+	def __init__(self, data, n_classes, *args, **kwargs):
 		super().__init__(data, *args, **kwargs)
-		self.class_f = class_f
 		self.n_classes = n_classes
 
 	def _init_batch(self, size):
@@ -375,8 +424,8 @@ class LabeledImageGenerator(ImageGenerator):
 		)
 
 	def _read_sample(self, i, sample):
-		self.batch[0][i] = self._load_img(sample)
-		self.batch[1][i] = to_categorical(self.class_f(sample), num_classes=self.n_classes, dtype=int)
+		self.batch[0][i] = self._load_img(sample.file)
+		self.batch[1][i] = to_categorical(sample.label, num_classes=self.n_classes, dtype=int)
 		
 		
 class Evaluation(object):

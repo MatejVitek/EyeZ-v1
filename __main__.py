@@ -19,15 +19,18 @@ def main():
 		os.path.join(dir, DATA[0]),
 		os.path.join(dir, DATA[1]),
 		first_unfreeze=143,
-		primary_epochs=100,
-		secondary_epochs=30,
+		primary_epochs=2,
+		secondary_epochs=2,
 		opt1=RMSprop(lr=1e-4),
 		opt2=SGD(lr=1e-5, momentum=0.5, nesterov=True),
 		both_eyes_same_class=True,
 		feature_size=1024,
-		plot=True
+		plot=True,
+		naming='ie_d_n',
+		directions='lrsu',
+		eyes='LR'
 	)(
-		k=10,
+		k=2,
 		gp_split=0.3
 	)
 
