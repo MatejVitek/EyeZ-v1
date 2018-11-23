@@ -8,6 +8,7 @@ import os
 import platform
 import re
 import shutil
+import subprocess
 import sys
 
 
@@ -17,7 +18,7 @@ SECONDARY_CHANNELS = ('canthus', 'eyelashes', 'iris', 'pupil', 'vessels')
 IMG_EXTS = ('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff')
 
 
-def annotations_to_masks(source_dir, target_dir, save_type='json', plot=False, overwrite=True, **kwargs):
+def annotations_to_masks(source_dir, target_dir, **kwargs):
 	if not os.path.isdir(source_dir):
 		raise ValueError(f"{source_dir} is not a directory.")
 		
@@ -36,19 +37,28 @@ def annotations_to_masks(source_dir, target_dir, save_type='json', plot=False, o
 			format='[%(asctime)s] %(levelname)s: %(message)s',
 			datefmt='%d-%m-%Y %H:%M%S'
 		)
-	
-	if isinstance(save_type, str):
-		save_type = (save_type,)
-	save_type = list(map(str.lower, save_type))
-	all_types = any(t == 'all' for t in save_type)
 
+	plot = kwargs.get('plot', False)
+	overwrite = kwargs.get('overwrite', True)
+	count_only = kwargs.get('count_only', False)
+	log_diff = kwargs.get('log_diff', True)
+	
+	save_type = kwargs.get('save_type', 'img')
+	if save_type:
+		if isinstance(save_type, str):
+			save_type = (save_type,)
+		save_type = list(map(str.lower, save_type))
+		all_types = any(t == 'all' for t in save_type)
+	else:
+		all_types = None
+	
 	cls_dirs = [i for i in os.listdir(source_dir) if os.path.isdir(os.path.join(source_dir, i))]
 	source_dirs = [os.path.join(source_dir, cls_dir) for cls_dir in cls_dirs]
 	target_dirs = [os.path.join(target_dir, cls_dir) for cls_dir in cls_dirs]
 	for dir in target_dirs:
 		os.makedirs(dir, exist_ok=True)
+	channels = PRIMARY_CHANNELS + SECONDARY_CHANNELS
 	
-	channels = PRIMARY_CHANNELS + SECONDARY_CHANNELS	
 	counter = sum(Parallel(n_jobs=-1, backend='multiprocessing')(
 		delayed(_process_image)(fname, source, target, channels, overwrite, save_type, all_types, plot)
 		for (source, target) in zip(source_dirs, target_dirs)
@@ -59,12 +69,17 @@ def annotations_to_masks(source_dir, target_dir, save_type='json', plot=False, o
 	log = f"Classes: {counter['class']}\nImages: {counter['image']}\nAnnotations: {counter['channel']}\n"
 	log += "\n".join(f"{channel:{max_len[0]}}: {counter[channel]:{max_len[1]}}" for channel in channels)
 	
-	tree_src = subprocess.run(['tree', source_dir], capture_output=True).stdout
-	tree_tgt = subprocess.run(['tree', target_dir], capture_output=True).stdout
-	log += subprocess.run(['diff', tree_src, tree_tgt], caputre_output=True).stdout
+	if log_diff:
+		with open('./tree_src', 'w') as f:
+			subprocess.run(['tree', source_dir], stdout=f)
+		with open('./tree_tgt', 'w') as f:
+			subprocess.run(['tree', target_dir], stdout=f)
+		log += "\n\n\n" + subprocess.run(['diff', './tree_src', './tree_tgt'], stdout=subprocess.PIPE, universal_newlines=True).stdout
+		os.remove('./tree_src')
+		os.remove('./tree_tgt')
 	
 	print(log)
-	logging.log(logging.CRITICAL, log)
+	logging.log(1000, log)
 
 
 def _process_image(fname, source, target, channels, overwrite, save_type, all_types, plot):
@@ -85,13 +100,21 @@ def _process_image(fname, source, target, channels, overwrite, save_type, all_ty
 	mask = {}
 	for channel in channels:
 		for img_ext in IMG_EXTS:
-			try_file = f'{basename}_{channel}{img_ext}'
+			try_fname = f'{basename}_{channel}{img_ext}'
+			try_f = os.path.join(source, try_fname)
+			if not save_type:
+				if os.path.isfile(try_f):
+					counter['channel'] += 1
+					counter[channel] += 1
+					break
+				else:
+					continue
 			try:
-				annotation = img.imread(os.path.join(source, try_file))[..., :3]
+				annotation = img.imread(try_f)[..., :3]
 			except FileNotFoundError:
 				continue
 			except OSError:
-				logging.error(f"Unexpected error while trying to read file {try_file}. File may be corrupt.")
+				logging.error(f"Unexpected error while trying to read file {try_fname}. File may be corrupt.")
 				continue
 				
 			mask[channel] = np.isclose(annotation, (0, 1, 0), atol=.01, rtol=0).all(axis=2)
@@ -101,7 +124,7 @@ def _process_image(fname, source, target, channels, overwrite, save_type, all_ty
 			counter[channel] += 1
 			
 			if plot:
-				fig = plt.figure(num=f'{try_file}')
+				fig = plt.figure(num=f'{try_fname}')
 				fig.add_subplot(121)
 				plt.imshow(annotation)
 				fig.add_subplot(122)
@@ -111,10 +134,10 @@ def _process_image(fname, source, target, channels, overwrite, save_type, all_ty
 			break
 		else:
 			if channel in PRIMARY_CHANNELS:
-				logging.warning(f"Missing primary channel {try_file}.")
+				logging.warning(f"Missing primary channel {basename}_{channel}.")
 			else:
-				logging.info(f"Missing secondary channel {try_file}.")
-	if not mask:
+				logging.info(f"Missing secondary channel {basename}_{channel}.")
+	if not mask or not save_type:
 		return counter
 
 	save_name = os.path.join(target, '{}_{}{}')
@@ -166,4 +189,4 @@ def _process_image(fname, source, target, channels, overwrite, save_type, all_ty
 if __name__ == '__main__':
 	source = os.path.join(PATH, 'EyeZ', 'Rot', 'SBVP_vessels')
 	target = os.path.join(source, '..', 'SBVP_with_masks')
-	annotations_to_masks(source, target, save_type='img', plot=False, overwrite=False, logging_level=logging.INFO, logging_file='')
+	annotations_to_masks(source, target, save_type='img', plot=False, overwrite=False, logging_level=logging.WARNING, logging_file='')
