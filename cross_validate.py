@@ -109,7 +109,9 @@ class CV(object):
 	def cross_validate(self, k=10, gp_split=0.3):
 		if self.plot:
 			plt.ion()
-			colors = np.vstack((np.linspace(0, 1, k), [1] * k, [1] * k)).T
+			colors = np.ones(k, 3)
+			colors[0, :] = np.linspace(0, 1, k)
+			colors = matplotlib.colors.hsv_to_rgb(colors)
 
 		run_once = False
 		if k <= 1:
@@ -124,7 +126,7 @@ class CV(object):
 			print(f"Fold {i+1}:")
 
 			if self.plot:
-				self.color = matplotlib.colors.hsv_to_rgb(colors[i])
+				self.color = colors[i]
 
 			# Build and train the model
 			self._build_model()

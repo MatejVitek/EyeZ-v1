@@ -21,21 +21,24 @@ IMG_EXTS = ('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff')
 def annotations_to_masks(source_dir, target_dir, **kwargs):
 	if not os.path.isdir(source_dir):
 		raise ValueError(f"{source_dir} is not a directory.")
-		
+
+	level = kwargs.get('logging_level', logging.WARNING),
+	format = kwargs.get('logging_format', '[%(asctime)s] %(levelname)s: %(message)s')
+	datefmt = kwargs.get('logging_datefmt', '%d-%m-%Y %H:%M%S')
 	if 'logging_file' not in kwargs:
 		logging.basicConfig(
 			stream=sys.stderr,
-			level=kwargs.get('logging_level', logging.WARNING),
-			format='[%(asctime)s] %(levelname)s: %(message)s',
-			datefmt='%d-%m-%Y %H:%M%S'
+			level=level,
+			format=format,
+			datefmt=datefmt
 		)
 	else:
 		logging.basicConfig(
 			filename=kwargs['logging_file'] or f'{os.path.splitext(os.path.realpath(__file__))[0]}.log',
 			filemode=kwargs.get('logging_filemode', 'w'),
-			level=kwargs.get('logging_level', logging.WARNING),
-			format='[%(asctime)s] %(levelname)s: %(message)s',
-			datefmt='%d-%m-%Y %H:%M%S'
+			level=level,
+			format=format,
+			datefmt=datefmt
 		)
 
 	plot = kwargs.get('plot', False)
@@ -70,13 +73,14 @@ def annotations_to_masks(source_dir, target_dir, **kwargs):
 	log += "\n".join(f"{channel:{max_len[0]}}: {counter[channel]:{max_len[1]}}" for channel in channels)
 	
 	if log_diff:
-		with open('./tree_src', 'w') as f:
+		with open('./tree1', 'w') as f:
 			subprocess.run(['tree', source_dir], stdout=f)
-		with open('./tree_tgt', 'w') as f:
+		with open('./tree2', 'w') as f:
 			subprocess.run(['tree', target_dir], stdout=f)
-		log += "\n\n\n" + subprocess.run(['diff', './tree_src', './tree_tgt'], stdout=subprocess.PIPE, universal_newlines=True).stdout
-		os.remove('./tree_src')
-		os.remove('./tree_tgt')
+		log += "\n\n\n"
+		log += subprocess.run(['diff', './tree1', './tree2'], stdout=subprocess.PIPE, universal_newlines=True).stdout
+		os.remove('./tree1')
+		os.remove('./tree2')
 	
 	print(log)
 	logging.log(1000, log)
@@ -102,7 +106,9 @@ def _process_image(fname, source, target, channels, overwrite, save_type, all_ty
 		for img_ext in IMG_EXTS:
 			try_fname = f'{basename}_{channel}{img_ext}'
 			try_f = os.path.join(source, try_fname)
+
 			if not save_type:
+				# Count only
 				if os.path.isfile(try_f):
 					counter['channel'] += 1
 					counter[channel] += 1
@@ -189,4 +195,4 @@ def _process_image(fname, source, target, channels, overwrite, save_type, all_ty
 if __name__ == '__main__':
 	source = os.path.join(PATH, 'EyeZ', 'Rot', 'SBVP_vessels')
 	target = os.path.join(source, '..', 'SBVP_with_masks')
-	annotations_to_masks(source, target, save_type='img', plot=False, overwrite=False, logging_level=logging.WARNING, logging_file='')
+	annotations_to_masks(source, target, save_type='img', plot=False, overwrite=False, logging_file='')
