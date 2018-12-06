@@ -4,6 +4,7 @@ import random
 import sklearn.metrics
 
 from cross_validate import *
+import utils
 
 
 def main():
@@ -11,7 +12,9 @@ def main():
 	#test_eer()
 	#test_eval()
 	#test_metric()
-	test_naming()
+	#test_naming()
+	#test_info()
+	test_group()
 
 
 def test_roc():
@@ -65,6 +68,25 @@ def test_naming():
 	naming = 'ie_d_n'
 	cv = CV(ResNet50(), 'asdf', 'asdf', naming=naming)
 	print(cv.naming)
+	
+	
+def test_info():
+	for info in utils.get_id_info():
+		print(info.gender, info.age, info.color)
+
+
+def test_group():
+	info = lambda: None
+	samples = [1, 2, 3, 1, 0, 2, 1.5, 2.5, 6, 8, 10, 15]
+	info.grp_by = float
+	info.grp_bins = [1, 3, 5, 10]
+	print(group_samples(samples, info))
+	samples = ['asdf', 'asdf', 'fdas', 'asdf', 'fdas', 'fdsa']
+	info.grp_by = str
+	info.grp_bins = None
+	print(group_samples(samples, info))
+	info.grp_bins = ['asdf', 'fdas']
+	print(group_samples(samples, info))
 
 
 if __name__ == '__main__':

@@ -1,164 +1,252 @@
-import itertools
-import matplotlib.colors
-import matplotlib.pyplot as plt
-import numpy as np
-import os
-import random
-import re
-import scipy as sp
-import sklearn.metrics
-
-from keras.layers import Dense, Flatten
-from keras.models import Sequential
-from keras.optimizers import SGD, RMSprop
-from keras.preprocessing import image
-from keras.utils import Sequence, to_categorical
-
-import utils
-
-
 L = 0
 R = 1
 C = 2
 U = 3
 
 
+import matplotlib.colors
+import matplotlib.pyplot as plt
+import numpy as np
+import os
+import scipy as sp
+import sklearn.metrics
+
+from keras.layers import Dense, Flatten
+from keras.models import Sequential
+from keras.optimizers import SGD, RMSprop
+
+from data_split import CVSplit, RatioSplit
+from evaluation import Evaluation
+from image_generators import ImageGenerator, LabeledImageGenerator
+from model_wrapper import CVModel, TrainableNNModel
+from naming_convention import NamingHandler
+import utils
+
+
+EXTRA_INFO = utils.get_id_info()
+
+
+class Sample(object):
+	def __init__(self, f, info):
+		self.file = f
+		self.basename = os.path.basename(os.path.splitext(self.file)[0])
+		self.__dict__.update(info.naming.parse(self.basename))
+
+		self.gender = EXTRA_INFO[self.id].gender
+		self.age = EXTRA_INFO[self.id].age
+		self.color = EXTRA_INFO[self.id].color
+
+		self.label = None
+
+
 class CV(object):
-	def __init__(self, base_model, train_dir, test_dir, **kwargs):
-		# Base model settings
-		self.base = base_model
-		self.base_weights = self.base.get_weights()
-		self.input_size = base_model.input_shape[1:3]
-		if any(size is None for size in self.input_size):
-			self.input_size = (256, 256)
-			
-		# Directories
+	def __init__(self, model, train_dir, test_dir, **kw):
+		"""
+		Initializes a new cross-validation object
+
+		:param CVModel model: Predictor wrapped for evaluation
+		:param train_dir: Directory with training data (must adhere to keras structure). If None, no training will be done.
+		:type train_dir: str or None
+		:param str test_dir: Directory with testing data (must adhere to keras structure)
+		:param bool eyes_same_class: Whether both eyes should be counted as the same class.
+		:param int mirrored_offset: Offset for mirrored identities. If 0, mirrored eyes will be counted as distinct classes.
+		:param bool plot: Whether to draw plots
+		:param group_by: Characteristic to group identities by. If None, no grouping will be done.
+		:param bins: If sequence of n numbers [x1, ..., xn], will split data into n+1 bins (x<=x1, x1<x<=x2, ...).
+		             Otherwise will split the data into n bins (x=x1, x=x2, ...).
+		:param bool crossbin_eval: Whether to use cross-bin evaluation in impostor testing
+		"""
+
+		# Model and directories
+		self.model = model
 		self.train_dir = train_dir
 		self.test_dir = test_dir
+
+		# If training directory was specified, model has to be trainable (uncomment after CVModel done)
+		#if self.train_dir and not isinstance(self.model, TrainableNNModel):
+			#raise ValueError("If training, model must be a subclass of TrainableNNModel")
+
+		# Delete after CVModel done
+		self.base = model
+		self.base_weights = self.base.get_weights()
+		self.input_size = self.base.input_shape[1:3]
+		if any(size is None for size in self.input_size):
+			self.input_size = (256, 256)
+		self.dist = kw.get('distance', 'cosine')
+		self.batch_size = kw.get('batch_size', 32)
+		self.epochs1 = kw.get('primary_epochs') or kw.get('top_epochs') or kw.get('epochs1') or kw.get('epochs', 50)
+		self.epochs2 = kw.get('secondary_epochs') or kw.get('unfrozen_epochs') or kw.get('epochs2', 20)
+		self.feature_size = kw.get('feature_size', 1024)
+		self.first_unfreeze = kw.get('first_unfreeze')
+		self.opt1 = kw.get('opt1') or kw.get('opt', 'rmsprop')
+		self.opt2 = kw.get('opt2', SGD(lr=0.0001, momentum=0.9))
 		
 		# Other settings
-		self.batch_size = kwargs.get('batch_size', 32)
-		self.dist = kwargs.get('distance', 'cosine')
-		self.epochs1 = kwargs.get('primary_epochs') or kwargs.get('top_epochs') or kwargs.get('epochs1') or kwargs.get('epochs', 50)
-		self.epochs2 = kwargs.get('secondary_epochs') or kwargs.get('unfrozen_epochs') or kwargs.get('epochs2', 20)
-		self.eyes_same_class = kwargs.get('both_eyes_same_class', True)
-		self.feature_size = kwargs.get('feature_size', 1024)
-		self.first_unfreeze = kwargs.get('first_unfreeze')
-		self.opt1 = kwargs.get('opt1') or kwargs.get('opt', 'rmsprop')
-		self.opt2 = kwargs.get('opt2', SGD(lr=0.0001, momentum=0.9))
-		self.plot = kwargs.get('plot', True)
+		eyes_same_class = kw.get('both_eyes_same_class', True)
+		mirrored_offset = kw.get('mirrored_offset', True)
+		self.plot = kw.get('plot', True)
+		self.grp_by = kw.get('group_by')
+		self.grp_bins = kw.get('bins')
+		self.grp_cross_eval = kw.get('crossbin_eval')
 
-		# Count classes
-		classes = [
-			int(max(re.findall(r'\d+', cls), key=len))
-			for d in (self.train_dir, self.test_dir)
-			for cls in os.listdir(d)
-			if os.path.isdir(os.path.join(d, cls))
-		]
-		self.min_id = min(classes)
-		if self.min_id not in (0, 1):
-			raise ValueError("Illegal classes: subject IDs should start at 0 or 1.")
-		self.n_classes = max(classes) + 1 - self.min_id
-		if not self.eyes_same_class:
-			self.n_classes *= 2
-		print(f"Found {self.n_classes} classes.")
-		
-		# File naming conventions
-		self.eyes = kwargs.get('eyes', r'LR')
-		self.directions = kwargs.get('directions', r'lrcu')
-		if isinstance(self.directions, dict):
-			self.directions = ''.join(
-				self.directions[d]
-				for d in (
-					L, 'left', 'Left', 'LEFT', 'l', 'L',
-					R, 'right', 'Right', 'RIGHT', 'r', 'R',
-					C, 'center', 'Center', 'CENTER', 'c', 'C',
-					U, 'up', 'Up', 'UP', 'u', 'U'
-				)
-				if d in self.directions.keys()
-			)
-		else:
-			self.directions = ''.join(self.directions)
-
-		if 'naming_re' in kwargs:
-			self.naming = kwargs['naming_re']
-		else:
-			if 'naming' in kwargs:
-				self.naming = kwargs['naming'].lower()
-			else:
-				self.naming = 'ie_d_n'
-			rep = {
-				'i': r'(?P<id>\d+)',
-				'e': rf'(?P<eye>[{self.eyes}])',
-				'd': rf'(?P<dir>[{self.directions}])',
-				'n': r'(?P<n>\d+)'
-			}
-			self.naming = utils.multi_replace(re.escape(self.naming), rep, True)
-		for pattern in (r'(?P<id>', r'(?P<eye>', r'(?P<dir>', r'(?P<n>'):
-			if pattern not in self.naming:
-				raise ValueError(f"Missing pattern {pattern} in naming regex.")
-		
-		# Non-initialized variables
+		# Uninitialized variables
 		self.model = None
 		self.tv_split = self.gp_split = None
 		self.color = None
+		self.bin_labels = None
+		
+		# File naming conventions
+		self.naming = NamingHandler(
+			kw.get('naming_re'),
+			kw.get('naming', r'ie_d_n'),
+			kw.get('eyes', r'LR'),
+			kw.get('directions', r'lrsu'),
+			kw.get('naming_strict', False)
+		)
 
-	def __call__(self, *args, **kwargs):
-		return self.cross_validate(*args, **kwargs)
+		# Read data and determine class labels
+		self.data = {}
+		self.n_classes = {}
+		for (t, dir) in (('train', self.train_dir), ('test', self.test_dir)):
+			if not dir:
+				continue
+
+			self.data[t] = self._read_samples(dir)
+			flipped = [mirrored_offset and s.id > mirrored_offset for s in self.data[t]]
+			adjusted_ids = [(s.id - mirrored_offset) if f else s.id for (s, f) in zip(self.data[t], flipped)]
+			sorted_ids = sorted({_ for _ in adjusted_ids})
+
+			for (s, f, id) in zip(self.data[t], flipped, adjusted_ids):
+				if eyes_same_class:
+					s.label = sorted_ids.index(id)
+				# If id is mirrored (and we're counting mirrored images as same class), we need to reverse L/R for mirrored images.
+				else:
+					s.label = 2 * sorted_ids.index(id) + ((1 - s.eye) if f else s.eye)
+
+			self.n_classes[t] = len({s.label for s in self.data[t]})
+			print(f"Found {len(self.data[t])} {t}ing images belonging to {self.n_classes[t]} classes.")
+
+		print(f"Found {sum(len(data) for data in self.data.values())} total images belonging to {len({s.label for data in self.data.values() for s in data})} classes.")
+
+	def __call__(self, *args, **kw):
+		return self.cross_validate(*args, **kw)
 
 	def cross_validate(self, k=10, gp_split=0.3):
+		# Uniform random colors
 		if self.plot:
 			plt.ion()
-			colors = np.ones(k, 3)
-			colors[0, :] = np.linspace(0, 1, k)
+			colors = np.ones((k, 3))
+			colors[:, 0] = np.linspace(0, 1, k, endpoint=False)
 			colors = matplotlib.colors.hsv_to_rgb(colors)
 
+		# Special case for k = 1
 		run_once = False
 		if k <= 1:
 			k = 2
 			run_once = True
 
-		self.tv_split = CVSplit(self.train_dir, k, self)
-		self.gp_split = RatioSplit(self.test_dir, gp_split, self)
+		# Group data (only one group if no grouping done)
+		self.data = {t: [data] for (t, data) in self.data.items()}
+
+		if self.train_dir:
+			if self.grp_by:
+				self.data['train'] = self._group_samples(self.data['train'][0])
+		else:
+			self.data['train'] = [None]
+
+		if self.grp_by:
+			self.data['test'] = self._group_samples(self.data['test'][0])
+
+		if len(self.data['test']) == 1 < len(self.data['train']):
+			self.data['test'] *= len(self.data['train'])
+		elif len(self.data['train']) == 1 < len(self.data['test']):
+			self.data['train'] *= len(self.data['test'])
+		if not self.bin_labels:
+			self.bin_labels = [None] * len(self.data['train'])
+		assert len(self.data['train']) == len(self.data['test']) == len(self.bin_labels)
 
 		evaluation = Evaluation()
-		for i in range(k):
-			print(f"Fold {i+1}:")
+		for train_group, test_group, bin in zip(self.data['train'], self.data['test'], self.bin_labels):
+			if self.grp_by:
+				print(bin.format(self.grp_by if isinstance(self.grp_by, str) else "x") + ":")
 
-			if self.plot:
-				self.color = colors[i]
+			if self.train_dir:
+				self.tv_split = CVSplit(train_group, k)
+			self.gp_split = RatioSplit(test_group, gp_split)
 
-			# Build and train the model
-			self._build_model()
-			self._train_model(i)
-		
-			# Remove softmax layer and evaluate model
-			self._remove_top_from_model()
-			self._evaluate_model(evaluation)
-		
-			# Clean up
-			for layer in self.base.layers:
-				layer.trainable = True
-			self.base.set_weights(self.base_weights)
-			
-			if run_once:
-				break
-		
+			for i in range(k):
+				print(f"Fold {i+1}:")
+
+				if self.plot:
+					self.color = colors[i]
+
+				if self.train_dir:
+					# Build and train the model
+					self._build_model()
+					self._train_model(i)
+
+					# Remove softmax layer and evaluate the model
+					self._remove_top_from_model()
+					self._evaluate_model(evaluation)
+
+					# Clean up
+					for layer in self.base.layers:
+						layer.trainable = True
+					self.base.set_weights(self.base_weights)
+
+				else:
+					self.model = self.base
+					self._evaluate_model(evaluation)
+
+				if run_once:
+					break
+
 		print("Final evaluation:")
 		print(evaluation)
 		if self.plot:
 			plt.ioff()
 			plt.show()
+
+	def _read_samples(self, dir):
+		return [
+			Sample(os.path.join(dir, cls_dir, sample), self)
+			for cls_dir in os.listdir(dir)
+			if os.path.isdir(os.path.join(dir, cls_dir))
+			for sample in os.listdir(os.path.join(dir, cls_dir))
+			if os.path.isfile(os.path.join(dir, cls_dir, sample))
+			and self.naming.valid(os.path.splitext(sample)[0])
+		]
+
+	def _group_samples(self, samples):
+		f = (lambda sample: getattr(sample, self.grp_by)) if isinstance(self.grp_by, str) else self.grp_by
+		bins = sorted(self.grp_bins or set(f(s) for s in samples))
+
+		try:
+			# Check if all bins are numbers
+			all(bin < float('inf') for bin in bins)
+			self.bin_labels = [
+				((str(bins[i-1]) + " > ") if i > 0 else "") + '{}' + ((" <= " + str(bins[i])) if i < len(bins) else "")
+				for i in range(len(bins) + 1)
+			]
+			return [[
+				s for s in samples
+				if (i == 0 or f(s) > bins[i-1])
+				and (i == len(bins) or f(s) <= bins[i])
+			] for i in range(len(bins) + 1)]
+		except TypeError:
+			self.bin_labels = bins
+			return [[s for s in samples if f(s) == bin] for bin in bins]
 		
 	def _build_model(self):
 		# Add own top layer(s)
 		self.model = Sequential()
 		self.model.add(self.base)
-		self.model.add(Dense(
-			self.feature_size,
-			name='top_fc',
-			activation='relu'
-		))
+		if self.feature_size:
+			self.model.add(Dense(
+				self.feature_size,
+				name='top_fc',
+				activation='relu'
+			))
 		self.model.add(Dense(
 			self.n_classes,
 			name='top_softmax',
@@ -168,15 +256,15 @@ class CV(object):
 	def _remove_top_from_model(self):
 		self.model.pop()
 		
-	def _train_model(self, step):
+	def _train_model(self, fold):
 		t_gen = LabeledImageGenerator(
-			self.tv_split[(x for x in range(len(self.tv_split)) if x != step)],
+			self.tv_split[(x for x in range(len(self.tv_split)) if x != fold)],
 			self.n_classes,
 			target_size=self.input_size,
 			batch_size=self.batch_size
 		)
 		v_gen = LabeledImageGenerator(
-			self.tv_split[step],
+			self.tv_split[fold],
 			self.n_classes,
 			target_size=self.input_size,
 			batch_size=self.batch_size
@@ -194,7 +282,7 @@ class CV(object):
 				layer.trainable = True
 			print("Training unfrozen layers:")
 			self._fit_model(t_gen, v_gen, epochs=self.epochs2, opt=self.opt2, loss='categorical_crossentropy')
-		
+
 		else:
 			print("Training model:")
 			self._fit_model(t_gen, v_gen, epochs=self.epochs1, opt=self.opt1, loss='categorical_crossentropy')
@@ -230,28 +318,16 @@ class CV(object):
 		
 		g_classes = [s.label for s in self.gp_split['gallery']]
 		p_classes = [s.label for s in self.gp_split['probe']]
-		
-		same = np.array([
-			(g, p)
-			for (g, g_cls) in zip(g_features, g_classes)
-			for (p, p_cls) in zip(p_features, p_classes)
-			if g_cls == p_cls
-		])
-		diff = np.array([
-			(g, p)
-			for (g, g_cls) in zip(g_features, g_classes)
-			for (p, p_cls) in zip(p_features, p_classes)
-			if g_cls != p_cls
-		])
-						
+
 		# rows = gallery, columns = probe
 		dist_matrix = np.absolute(sp.spatial.distance.cdist(g_features, p_features, metric=self.dist))
 
 		# Get FAR and FRR
-		far, frr, threshold = self._error_rates(dist_matrix, g_classes, p_classes, return_threshold=True, n_points=1000)
+		threshold = np.linspace(dist_matrix.min(), dist_matrix.max(), 1000)#np.unique(dist_matrix)
+		far, frr = self._error_rates(dist_matrix, g_classes, p_classes, threshold)
 		
 		# EER
-		eer = self._compute_eer(far, frr)
+		eer = self._compute_eer(far, frr, threshold)
 		print(f"EER: {eer}")
 		evaluation.eer.update(eer)
 		if self.plot:
@@ -259,37 +335,47 @@ class CV(object):
 			self._draw(threshold, frr, "Threshold", "FRR", figure="EER")
 		
 		# AUC
-		trr = 1 - frr
-		auc = sklearn.metrics.auc(far, trr)
+		tar = 1 - frr
+		auc = sklearn.metrics.auc(far, tar)
 		print(f"AUC: {auc}")
 		evaluation.auc.update(auc)
 		if self.plot:
-			self._draw(far, trr, "FAR", "1 - FRR", figure="ROC Curve")
+			self._draw(far, tar, "FAR", "TAR", figure="ROC Curve")
+
+		# VER@1FAR
+		ver1far = self._compute_ver_at_far(far, tar, threshold, 0.01)
+		print(f"VER@1FAR: {ver1far}")
+		evaluation.ver1far.update(ver1far)
 	
 	@staticmethod
-	def _error_rates(dist_matrix, g_classes, p_classes, return_threshold=False, n_points=0):
-		if n_points:
-			threshold = np.linspace(dist_matrix.min(), dist_matrix.max(), n_points)
-		else:
-			threshold = np.unique(dist_matrix)
-		
+	def _error_rates(dist_matrix, g_classes, p_classes, threshold):
 		same = np.array([d for ((g, p), d) in np.ndenumerate(dist_matrix) if g_classes[g] == p_classes[p]])
 		diff = np.array([d for ((g, p), d) in np.ndenumerate(dist_matrix) if g_classes[g] != p_classes[p]])
 			
 		far = np.array([np.count_nonzero(diff <= t) / len(diff) for t in threshold])
 		frr = np.array([np.count_nonzero(same > t) / len(same) for t in threshold])
 		
-		if return_threshold:
-			return far, frr, threshold
-		else:
-			return far, frr
+		return far, frr
 		
 	@staticmethod
-	def _compute_eer(far, frr):
-		# See https://math.stackexchange.com/questions/2987246/finding-the-y-coordinate-of-the-intersection-of-two-functions-when-all-x-coordin for explanation of below formulas
+	def _compute_eer(far, frr, x):
+		# See https://math.stackexchange.com/questions/2987246/finding-the-y-coordinate-of-the-intersection-of-two-functions-when-all-x-coordin
+		# and https://en.wikipedia.org/wiki/Line%E2%80%93line_intersection#Given_two_points_on_each_line for explanation of below formulas
 		i = np.argwhere(np.diff(np.sign(far - frr))).flatten()[0]
-		return (far[i] * frr[i+1] - far[i+1] * frr[i]) / (far[i] - far[i+1] - frr[i] + frr[i+1])
-		
+
+		x = (x[i], x[i+1])
+		y = (far[i], far[i+1], frr[i], frr[i+1])
+		return (
+			((x[0] * y[1] - x[1] * y[0]) * (y[2] - y[3]) - (x[0] * y[3] - x[1] * y[2]) * (y[0] - y[1])) /
+			((x[0] - x[1]) * (-y[0] + y[1] + y[2] - y[3]))
+		)
+
+	@staticmethod
+	def _compute_ver_at_far(far, tar, x, far_point=0.01):
+		i = np.argwhere(np.diff(np.sign(far - far_point))).flatten()[0]
+		alpha = (far_point - x[i]) / (x[i+1] - x[1])
+		return alpha * tar[i] + (1 - alpha) * tar[i+1]
+
 	def _draw(self, x, y, xlabel=None, ylabel=None, figure=None, clear=False):
 		plt.figure(num=figure, clear=clear)
 		plt.plot(x, y, color=self.color)
@@ -299,181 +385,3 @@ class CV(object):
 			plt.ylabel(ylabel)
 		plt.draw()
 		plt.pause(1)
-		
-		
-class Sample(object):
-	def __init__(self, f, info):
-		self.file = f
-		self.basename = os.path.basename(os.path.splitext(self.file)[0])
-		match = re.match(info.naming, self.basename)
-		self.id = int(match.group('id'))
-		self.eye = info.eyes.index(match.group('eye'))
-		self.direction = info.directions.index(match.group('dir'))
-		self.n = int(match.group('n'))
-		
-		id_norm = self.id - info.min_id
-		if info.eyes_same_class:
-			self.label = id_norm
-		else:
-			self.label = 2 * id_norm if self.direction == L else 2 * id_norm + 1
-		
-		
-class CVSplit(object):
-	def __init__(self, dir, n_folds, info, all_dirs_same_fold=True):
-		# Read samples
-		samples = [
-			Sample(os.path.join(dir, cls_dir, sample), info)
-			for cls_dir in os.listdir(dir)
-			if os.path.isdir(os.path.join(dir, cls_dir))
-			for sample in os.listdir(os.path.join(dir, cls_dir))
-			if os.path.isfile(os.path.join(dir, cls_dir, sample))
-		]
-		
-		# Shuffle and split sample list
-		if all_dirs_same_fold:
-			key = lambda s: (s.id, s.eye, s.n)
-			samples.sort(key=key)
-			groups = [list(g) for _, g in itertools.groupby(samples, key)]
-			for group in groups:
-				random.shuffle(group)
-			random.shuffle(groups)
-			self.folds = [[sample for group in fold for sample in group] for fold in np.array_split(groups, n_folds)]
-		else:
-			random.shuffle(samples)
-			self.folds = np.array_split(samples, n_folds)
-		
-		print(f"Found {sum(map(len, self.folds))} images.")
-		
-	def __getitem__(self, index):
-		try:
-			# Return a single fold
-			return self.folds[index]
-		except TypeError:
-			# Return multiple folds as a single flattened list
-			return list(itertools.chain.from_iterable(self.folds[i] for i in index))
-			
-	def __len__(self):
-		return len(self.folds)
-
-
-class RatioSplit(object):
-	def __init__(self, dir, ratio, info):
-		self.samples = [
-			Sample(os.path.join(dir, cls_dir, sample), info)
-			for cls_dir in os.listdir(dir)
-			if os.path.isdir(os.path.join(dir, cls_dir))
-			for sample in os.listdir(os.path.join(dir, cls_dir))
-			if os.path.isfile(os.path.join(dir, cls_dir, sample))
-		]
-		self.split = round(ratio * len(self.samples))
-		
-		print(f"Found {len(self.samples)} images. Placing {self.split} in gallery and {len(self.samples) - self.split} in probe.")
-	
-	def __getitem__(self, index):
-		if index == 0 or isinstance(index, str) and index.lower() in ('g', 'gallery'):
-			return self.samples[:self.split]
-		elif index == 1 or isinstance(index, str) and index.lower() in ('p', 'probe'):
-			return self.samples[self.split:]
-		else:
-			raise IndexError("The only allowed indices are 0/'g'/'gallery' and 1/'p'/'probe'.")
-			
-	def shuffle(self):
-		return random.shuffle(self.samples)
-
-
-class ImageGenerator(Sequence):
-	def __init__(self, data, target_size=(256, 256), batch_size=32, shuffle=True):
-		self.data = data
-		self.target_size = target_size
-		self.batch_size = batch_size
-		self.batch = None
-		self.shuffle = shuffle
-		self.on_epoch_end()
-		
-	def __len__(self):
-		return int(np.ceil(len(self.data) / self.batch_size))
-		
-	def __getitem__(self, index):
-		self._init_batch(min(self.batch_size, len(self.data) - index * self.batch_size))
-		for (i, sample) in enumerate(self.data[index * self.batch_size:(index + 1) * self.batch_size]):
-			self._read_sample(i, sample)
-		return self.batch
-			
-	def _init_batch(self, size):
-		self.batch = np.empty((size, *self.target_size, 3), dtype=float)
-	
-	def _read_sample(self, i, sample):
-		self.batch[i] = self._load_img(sample.file)
-		
-	def _load_img(self, f):
-		x = image.load_img(f, target_size=self.target_size)
-		return image.img_to_array(x) / 255
-		
-	def on_epoch_end(self):
-		if self.shuffle:
-			random.shuffle(self.data)
-		
-
-class LabeledImageGenerator(ImageGenerator):
-	def __init__(self, data, n_classes, *args, **kwargs):
-		super().__init__(data, *args, **kwargs)
-		self.n_classes = n_classes
-
-	def _init_batch(self, size):
-		self.batch = (
-			np.empty((size, *self.target_size, 3), dtype=float),
-			np.empty((size, self.n_classes), dtype=int)
-		)
-
-	def _read_sample(self, i, sample):
-		self.batch[0][i] = self._load_img(sample.file)
-		self.batch[1][i] = to_categorical(sample.label, num_classes=self.n_classes, dtype=int)
-		
-		
-class Evaluation(object):
-	def __init__(self):
-		self.auc = Metric("AUC")
-		self.eer = Metric("EER")
-		
-	def __str__(self):
-		return "\n".join(str(metric) for metric in self.__dict__.values())
-		
-
-class Metric(object):
-	def __init__(self, name, values=None, ddof=0):
-		self.name = name
-		
-		self.mean = 0
-		self.var = 0
-		self.std = 0
-		
-		self._n = 0
-		self._s = 0
-		self._ddof = ddof
-		
-		if values is not None:
-			self.update(values)
-		
-	def __str__(self):
-		return f"{self.name} (\u03BC \u00B1 \u03C3): {self.mean} \u00B1 {self.std}"
-		
-	def __len__(self):
-		return self._n
-		
-	def update(self, values):
-		try:
-			for v in values:
-				self._update(v)
-		except TypeError:
-			self._update(values)
-		
-	def _update(self, value):
-		self._n += 1
-		
-		old_mean = self.mean
-		self.mean += (value - old_mean) / self._n
-		
-		self._s += (value - old_mean) * (value - self.mean)
-		self.var = self._s / (self._n - self._ddof) if self._n > self._ddof else 0
-		self.std = np.sqrt(self.var)
-
