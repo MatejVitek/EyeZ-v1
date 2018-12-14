@@ -24,7 +24,8 @@ def main():
 
 	# ScleraNET
 	model = load_model(os.path.join(utils.get_rot_dir(), 'Recognition', 'all_directions_same_id', 'models', 'id_dir_prediction.75-0.667.hdf5'))
-	model = Model(model.input, [model.get_layer('dense_1').output])#'final_features').output])
+	#model = Model(model.input, [model.get_layer('dense_1').output])
+	model = Model(model.input, [model.get_layer('final_features').output])
 
 	CV(
 		model,
