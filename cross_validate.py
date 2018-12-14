@@ -9,7 +9,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 import scipy as sp
-import sklearn.metrics
 
 from keras.layers import Dense, Flatten
 from keras.models import Sequential
@@ -323,30 +322,23 @@ class CV(object):
 		dist_matrix = np.absolute(sp.spatial.distance.cdist(g_features, p_features, metric=self.dist))
 
 		# Get FAR and FRR
-		threshold = np.linspace(dist_matrix.min(), dist_matrix.max(), 1000)#np.unique(dist_matrix)
-		far, frr = evaluation.error_rates(dist_matrix, g_classes, p_classes, threshold)
+		far, frr, threshold = evaluation.compute_error_rates(dist_matrix, g_classes, p_classes, n_points=5000)
 		
 		# EER
-		eer = eval_.eer(far, frr, threshold)
+		eer = evaluation.update_eer()
 		print(f"EER: {eer}")
 		if self.plot:
 			self._draw(threshold, far, "Threshold", "FAR", figure="EER")
 			self._draw(threshold, frr, "Threshold", "FRR", figure="EER")
 		
 		# AUC
-		tar = 1 - frr
-		auc = sklearn.metrics.auc(far, tar)
-		print(f"AUC: {auc}")
-		evaluation.auc.update(auc)
+		auc = evaluation.update_auc()
 		if self.plot:
-			self._draw(far, tar, "FAR", "TAR", figure="ROC Curve")
+			self._draw(far, 1 - frr, "FAR", "TAR", figure="ROC Curve")
 
-		# VER@1FAR
-		ver1far = evaluation.ver_at_far(far, tar, threshold, 0.01)
+		ver1far = evaluation.update_ver1far()
 		print(f"VER@1FAR: {ver1far}")
-		evaluation.ver1far.update(ver1far)
 
-	@staticmethod
 	def _draw(self, x, y, xlabel=None, ylabel=None, figure=None, clear=False):
 		plt.figure(num=figure, clear=clear)
 		plt.plot(x, y, color=self.color)

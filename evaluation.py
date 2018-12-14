@@ -1,14 +1,49 @@
 import numpy as np
+import sklearn.metrics as skmetrics
 
 
 class Evaluation(object):
 	def __init__(self):
+		self._threshold = None
+		self._far = None
+		self._frr = None
+		self._tar = None
 		self.auc = Metric("AUC")
 		self.eer = Metric("EER")
 		self.ver1far = Metric("VER@1FAR")
 
 	def __str__(self):
-		return "\n".join(str(metric) for metric in self.__dict__.values())
+		return "\n".join(str(metric) for metric in self.all_metrics())
+
+	def all_metrics(self):
+		return [metric for metric in self.__dict__.values() if isinstance(metric, Metric)]
+
+	def compute_error_rates(self, dist_matrix, g_classes, p_classes, n_points=1000):
+		self._threshold = np.linspace(dist_matrix.min(), dist_matrix.max(), n_points)#np.unique(dist_matrix)
+
+		same = np.array([d for ((g, p), d) in np.ndenumerate(dist_matrix) if g_classes[g] == p_classes[p]])
+		diff = np.array([d for ((g, p), d) in np.ndenumerate(dist_matrix) if g_classes[g] != p_classes[p]])
+
+		self._far = np.array([np.count_nonzero(diff <= t) / len(diff) for t in self._threshold])
+		self._frr = np.array([np.count_nonzero(same > t) / len(same) for t in self._threshold])
+		self._tar = 1 - self._frr
+
+		return self._far, self._frr, self._threshold
+
+	def update_auc(self):
+		auc = skmetrics.auc(self._far, self._tar)
+		self.auc.update(auc)
+		return auc
+
+	def update_eer(self):
+		eer_ = eer(self._far, self._frr, self._threshold)
+		self.eer.update(eer_)
+		return eer_
+
+	def update_ver1far(self):
+		ver = ver_at_far(self._far, self._tar, self._threshold, 0.01)
+		self.ver1far.update(ver)
+		return ver
 
 	def auc
 
@@ -50,16 +85,6 @@ class Metric(object):
 		self._s += (value - old_mean) * (value - self.mean)
 		self.var = self._s / (self._n - self._ddof) if self._n > self._ddof else 0
 		self.std = np.sqrt(self.var)
-
-
-def error_rates(dist_matrix, g_classes, p_classes, threshold):
-	same = np.array([d for ((g, p), d) in np.ndenumerate(dist_matrix) if g_classes[g] == p_classes[p]])
-	diff = np.array([d for ((g, p), d) in np.ndenumerate(dist_matrix) if g_classes[g] != p_classes[p]])
-
-	far = np.array([np.count_nonzero(diff <= t) / len(diff) for t in threshold])
-	frr = np.array([np.count_nonzero(same > t) / len(same) for t in threshold])
-
-	return far, frr
 
 
 def eer(far, frr, x):

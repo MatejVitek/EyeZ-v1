@@ -54,5 +54,66 @@ class TrainableNNModel(NNModel):
 		self.opt1 = kw.get('opt1') or kw.get('opt', 'rmsprop')
 		self.opt2 = kw.get('opt2', SGD(lr=0.0001, momentum=0.9))
 
+		self.base = self.model
+		self.base_weights = self.base.get_weights()
+		self.model = None
+
 	def train(self, data):
-		pass
+		self._build_model()
+
+		self.model.pop()
+
+	def _build_model(self):
+		# Add own top layer(s)
+		self.model = Sequential()
+		self.model.add(self.base)
+		if self.feature_size:
+			self.model.add(Dense(
+				self.feature_size,
+				name='top_fc',
+				activation='relu'
+			))
+		self.model.add(Dense(
+			self.n_classes,
+			name='top_softmax',
+			activation='softmax'
+		))
+
+	def _train_model(self, fold):
+		t_gen = LabeledImageGenerator(
+			self.tv_split[(x for x in range(len(self.tv_split)) if x != fold)],
+			self.n_classes,
+			target_size=self.input_size,
+			batch_size=self.batch_size
+		)
+		v_gen = LabeledImageGenerator(
+			self.tv_split[fold],
+			self.n_classes,
+			target_size=self.input_size,
+			batch_size=self.batch_size
+		)
+
+		if self.first_unfreeze is not None:
+			# Freeze base layers
+			for layer in self.base.layers:
+				layer.trainable = False
+			print("Training top layers:")
+			self._fit_model(t_gen, v_gen, epochs=self.epochs1, opt=self.opt1, loss='categorical_crossentropy')
+
+			# Unfreeze the last few base layers
+			for layer in self.base.layers[self.first_unfreeze:]:
+				layer.trainable = True
+			print("Training unfrozen layers:")
+			self._fit_model(t_gen, v_gen, epochs=self.epochs2, opt=self.opt2, loss='categorical_crossentropy')
+
+		else:
+			print("Training model:")
+			self._fit_model(t_gen, v_gen, epochs=self.epochs1, opt=self.opt1, loss='categorical_crossentropy')
+
+	def _fit_model(self, t_gen, v_gen, epochs, opt='SGD', loss='categorical_crossentropy'):
+		self.model.compile(optimizer=opt, loss=loss, metrics=['accuracy'])
+		self.model.fit_generator(
+			t_gen,
+			epochs=epochs,
+			validation_data=v_gen
+		)
