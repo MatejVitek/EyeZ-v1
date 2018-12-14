@@ -11,25 +11,14 @@ import utils
 # Recognition
 DATA_DIR = os.path.join(utils.get_rot_dir(), 'Recognition', 'all_directions_same_id')
 DATA = {'train': 'stage1', 'test': 'stage2'}
+MODEL = 'ResNet'
 
 
 def main():
-	first_unfreeze = None
-	feature_size = None
-
-	# ResNet50
-	#model = ResNet50(weights='imagenet', include_top=False, input_shape=(224, 224, 3), pooling='avg')
-	#first_unfreeze = 143
-	#feature_size = 1024
-
-	# ScleraNET
-	model = load_model(os.path.join(utils.get_rot_dir(), 'Recognition', 'all_directions_same_id', 'models', 'id_dir_prediction.75-0.667.hdf5'))
-	#model = Model(model.input, [model.get_layer('dense_1').output])
-	model = Model(model.input, [model.get_layer('final_features').output])
-
+	model, first_unfreeze, feature_size, train = scleranet()
 	CV(
 		model,
-		None,#os.path.join(DATA_DIR, DATA['train']),
+		os.path.join(DATA_DIR, DATA['train']) if train else None,
 		os.path.join(DATA_DIR, DATA['test']),
 		first_unfreeze=first_unfreeze,
 		primary_epochs=30,
@@ -51,6 +40,17 @@ def main():
 		k=2,
 		gp_split=0.3
 	)
+
+
+# Configs
+def resnet50():
+	return ResNet50(weights='imagenet', include_top=False, input_shape=(224, 224, 3), pooling='avg'), 143, 1024, True
+
+
+def scleranet():
+	model = load_model(os.path.join(utils.get_rot_dir(), 'Recognition', 'all_directions_same_id', 'models', 'id_dir_prediction.75-0.667.hdf5'))
+	#return Model(model.input, [model.get_layer('dense_1').output]), None, None
+	return Model(model.input, [model.get_layer('final_features').output]), None, None, False
 
 
 main()

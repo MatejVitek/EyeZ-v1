@@ -12,8 +12,10 @@ import scipy as sp
 
 from keras.layers import Dense, Flatten
 from keras.models import Sequential
+from keras.optimizers import SGD, RMSprop
 
 from data_split import CVSplit, RatioSplit
+from evaluation import Evaluation
 from image_generators import ImageGenerator, LabeledImageGenerator
 from model_wrapper import CVModel, TrainableNNModel
 from naming_convention import NamingHandler
@@ -33,7 +35,7 @@ class Sample(object):
 		self.age = EXTRA_INFO[self.id].age
 		self.color = EXTRA_INFO[self.id].color
 
-		self.label = self.id
+		self.label = None
 
 
 class CV(object):
@@ -43,13 +45,13 @@ class CV(object):
 
 		:param CVModel model: Predictor wrapped for evaluation
 		:param train_dir: Directory with training data (must adhere to keras structure). If None, no training will be done.
-		:type  train_dir: str or None
+		:type train_dir: str or None
 		:param str test_dir: Directory with testing data (must adhere to keras structure)
 		:param bool eyes_same_class: Whether both eyes should be counted as the same class.
 		:param int mirrored_offset: Offset for mirrored identities. If 0, mirrored eyes will be counted as distinct classes.
 		:param bool plot: Whether to draw plots
 		:param group_by: Characteristic to group identities by. If None, no grouping will be done.
-		:param bins: If [x1, ..., xn] is a sequence of numbers , will split data into n+1 bins (x<=x1, x1<x<=x2, ...).
+		:param bins: If sequence of n numbers [x1, ..., xn], will split data into n+1 bins (x<=x1, x1<x<=x2, ...).
 		             Otherwise will split the data into n bins (x=x1, x=x2, ...).
 		:param bool crossbin_eval: Whether to use cross-bin evaluation in impostor testing
 		"""
@@ -60,8 +62,23 @@ class CV(object):
 		self.test_dir = test_dir
 
 		# If training directory was specified, model has to be trainable (uncomment after CVModel done)
-		if self.train_dir and not isinstance(self.model, TrainableNNModel):
-			raise ValueError("If training, model must be a subclass of TrainableNNModel")
+		#if self.train_dir and not isinstance(self.model, TrainableNNModel):
+			#raise ValueError("If training, model must be a subclass of TrainableNNModel")
+
+		# Delete after CVModel done
+		self.base = model
+		self.base_weights = self.base.get_weights()
+		self.input_size = self.base.input_shape[1:3]
+		if any(size is None for size in self.input_size):
+			self.input_size = (256, 256)
+		self.dist = kw.get('distance', 'cosine')
+		self.batch_size = kw.get('batch_size', 32)
+		self.epochs1 = kw.get('primary_epochs') or kw.get('top_epochs') or kw.get('epochs1') or kw.get('epochs', 50)
+		self.epochs2 = kw.get('secondary_epochs') or kw.get('unfrozen_epochs') or kw.get('epochs2', 20)
+		self.feature_size = kw.get('feature_size', 1024)
+		self.first_unfreeze = kw.get('first_unfreeze')
+		self.opt1 = kw.get('opt1') or kw.get('opt', 'rmsprop')
+		self.opt2 = kw.get('opt2', SGD(lr=0.0001, momentum=0.9))
 		
 		# Other settings
 		eyes_same_class = kw.get('both_eyes_same_class', True)
@@ -72,6 +89,7 @@ class CV(object):
 		self.grp_cross_eval = kw.get('crossbin_eval')
 
 		# Uninitialized variables
+		self.model = None
 		self.tv_split = self.gp_split = None
 		self.color = None
 		self.bin_labels = None
@@ -146,7 +164,7 @@ class CV(object):
 			self.bin_labels = [None] * len(self.data['train'])
 		assert len(self.data['train']) == len(self.data['test']) == len(self.bin_labels)
 
-		evaluation = None
+		evaluation = Evaluation()
 		for train_group, test_group, bin in zip(self.data['train'], self.data['test'], self.bin_labels):
 			if self.grp_by:
 				print(bin.format(self.grp_by if isinstance(self.grp_by, str) else "x") + ":")
@@ -155,25 +173,29 @@ class CV(object):
 				self.tv_split = CVSplit(train_group, k)
 			self.gp_split = RatioSplit(test_group, gp_split)
 
-			for fold in range(k):
-				print(f"Fold {fold+1}:")
+			for i in range(k):
+				print(f"Fold {i+1}:")
 
 				if self.plot:
-					self.color = colors[fold]
+					self.color = colors[i]
 
 				if self.train_dir:
-					assert isinstance(self.model, TrainableNNModel)
-					train = self.tv_split[(x for x in range(len(self.tv_split)) if x != fold)]
-					val = self.tv_split[fold]
-					self.model.train(train, val)
+					# Build and train the model
+					self._build_model()
+					self._train_model(i)
 
-				self.gp_split.shuffle()
-				gallery = self.gp_split['gallery']
-				probe = self.gp_split['probe']
-				evaluation = self.model.evaluate(gallery, probe, evaluation, self._draw)
+					# Remove softmax layer and evaluate the model
+					self._remove_top_from_model()
+					self._evaluate_model(evaluation)
 
-				if self.train_dir:
-					self.model.reset()
+					# Clean up
+					for layer in self.base.layers:
+						layer.trainable = True
+					self.base.set_weights(self.base_weights)
+
+				else:
+					self.model = self.base
+					self._evaluate_model(evaluation)
 
 				if run_once:
 					break
@@ -213,6 +235,109 @@ class CV(object):
 		except TypeError:
 			self.bin_labels = bins
 			return [[s for s in samples if f(s) == bin] for bin in bins]
+		
+	def _build_model(self):
+		# Add own top layer(s)
+		self.model = Sequential()
+		self.model.add(self.base)
+		if self.feature_size:
+			self.model.add(Dense(
+				self.feature_size,
+				name='top_fc',
+				activation='relu'
+			))
+		self.model.add(Dense(
+			self.n_classes,
+			name='top_softmax',
+			activation='softmax'
+		))
+		
+	def _remove_top_from_model(self):
+		self.model.pop()
+		
+	def _train_model(self, fold):
+		t_gen = LabeledImageGenerator(
+			self.tv_split[(x for x in range(len(self.tv_split)) if x != fold)],
+			self.n_classes,
+			target_size=self.input_size,
+			batch_size=self.batch_size
+		)
+		v_gen = LabeledImageGenerator(
+			self.tv_split[fold],
+			self.n_classes,
+			target_size=self.input_size,
+			batch_size=self.batch_size
+		)
+	
+		if self.first_unfreeze is not None:
+			# Freeze base layers
+			for layer in self.base.layers:
+				layer.trainable = False
+			print("Training top layers:")
+			self._fit_model(t_gen, v_gen, epochs=self.epochs1, opt=self.opt1, loss='categorical_crossentropy')
+
+			# Unfreeze the last few base layers
+			for layer in self.base.layers[self.first_unfreeze:]:
+				layer.trainable = True
+			print("Training unfrozen layers:")
+			self._fit_model(t_gen, v_gen, epochs=self.epochs2, opt=self.opt2, loss='categorical_crossentropy')
+
+		else:
+			print("Training model:")
+			self._fit_model(t_gen, v_gen, epochs=self.epochs1, opt=self.opt1, loss='categorical_crossentropy')
+		
+	def _fit_model(self, t_gen, v_gen, epochs, opt='SGD', loss='categorical_crossentropy'):
+		self.model.compile(optimizer=opt, loss=loss, metrics=['accuracy'])
+		self.model.fit_generator(
+			t_gen,
+			epochs=epochs,
+			validation_data=v_gen
+		)
+	
+	def _evaluate_model(self, evaluation):
+		self.gp_split.shuffle()
+		g_gen = ImageGenerator(
+			self.gp_split['gallery'],
+			target_size=self.input_size,
+			batch_size=self.batch_size,
+			shuffle=False
+		)
+		p_gen = ImageGenerator(
+			self.gp_split['probe'],
+			target_size=self.input_size,
+			batch_size=self.batch_size,
+			shuffle=False
+		)
+	
+		# rows = samples, columns = features
+		print("Predicting gallery features:")
+		g_features = self.model.predict_generator(g_gen, verbose=1)
+		print("Predicting probe features:")
+		p_features = self.model.predict_generator(p_gen, verbose=1)
+		
+		g_classes = [s.label for s in self.gp_split['gallery']]
+		p_classes = [s.label for s in self.gp_split['probe']]
+
+		# rows = gallery, columns = probe
+		dist_matrix = np.absolute(sp.spatial.distance.cdist(g_features, p_features, metric=self.dist))
+
+		# Get FAR and FRR
+		far, frr, threshold = evaluation.compute_error_rates(dist_matrix, g_classes, p_classes, n_points=5000)
+		
+		# EER
+		eer = evaluation.update_eer()
+		print(f"EER: {eer}")
+		if self.plot:
+			self._draw(threshold, far, "Threshold", "FAR", figure="EER")
+			self._draw(threshold, frr, "Threshold", "FRR", figure="EER")
+		
+		# AUC
+		auc = evaluation.update_auc()
+		if self.plot:
+			self._draw(far, 1 - frr, "FAR", "TAR", figure="ROC Curve")
+
+		ver1far = evaluation.update_ver1far()
+		print(f"VER@1FAR: {ver1far}")
 
 	def _draw(self, x, y, xlabel=None, ylabel=None, figure=None, clear=False):
 		plt.figure(num=figure, clear=clear)

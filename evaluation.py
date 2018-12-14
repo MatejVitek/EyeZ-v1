@@ -45,8 +45,6 @@ class Evaluation(object):
 		self.ver1far.update(ver)
 		return ver
 
-	def auc
-
 
 class Metric(object):
 	def __init__(self, name, values=None, ddof=0):
