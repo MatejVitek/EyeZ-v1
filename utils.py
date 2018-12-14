@@ -42,3 +42,49 @@ def get_id_info(path=os.path.join(get_rot_dir(), 'SBVP_Gender_Age_Color.txt')):
 def shuffle(l):
 	random.shuffle(l)
 	return l
+
+
+class Bin(object):
+	def __init__(self, label, samples):
+		self.label = label
+		self.samples = samples
+
+
+def get_bins(samples, by='age', bins=None, get_id='id', bin_labels=None):
+	id_info = get_id_info()
+
+	if not get_id:
+		ids = map(int, samples)
+	elif isinstance(get_id, str):
+		ids = [int(getattr(s, get_id)) for s in samples]
+	else:
+		ids = [int(get_id(s)) for s in samples]
+
+	f = (lambda id: getattr(id_info[id], by)) if isinstance(by, str) else by
+	bins = sorted(bins or set(f(id) for id in ids))
+
+	try:
+		# Check if all bins are numbers
+		all(bin < float('inf') for bin in bins)
+		return [
+			# If bin labels not given, use "left_bin_border <= by < right_bin_border"
+			Bin(
+				bin_labels[i] if bin_labels else (
+					((str(bins[i - 1]) + " > ") if i > 0 else "")
+					+ f'{by}'
+					+ ((" <= " + str(bins[i])) if i < len(bins) else "")
+				),
+				[
+					s
+					for (s, id) in zip(samples, ids)
+					if (i == 0 or f(id) > bins[i-1])
+					and (i == len(bins) or f(id) <= bins[i])
+				]
+			) for i in range(len(bins) + 1)
+		]
+	except TypeError:
+		# If bin labels not given, use bin names
+		return [
+			Bin(bin_label, [s for (s, id) in zip(samples, ids) if f(id) == bin])
+			for bin_label, bin in zip((bin_labels or bins), bins)
+		]
