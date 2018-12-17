@@ -7,7 +7,7 @@ import pickle
 from tqdm import tqdm
 
 
-def format_bin_label(x, pos):
+def format_bin_label(x, _):
 	return np.format_float_positional(x, precision=3, trim='-')
 
 

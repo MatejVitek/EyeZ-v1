@@ -213,13 +213,3 @@ class CV(object):
 		except TypeError:
 			self.bin_labels = bins
 			return [[s for s in samples if f(s) == bin] for bin in bins]
-
-	def _draw(self, x, y, xlabel=None, ylabel=None, figure=None, clear=False):
-		plt.figure(num=figure, clear=clear)
-		plt.plot(x, y, color=self.color)
-		if xlabel:
-			plt.xlabel(xlabel)
-		if ylabel:
-			plt.ylabel(ylabel)
-		plt.draw()
-		plt.pause(1)
