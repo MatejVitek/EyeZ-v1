@@ -46,7 +46,7 @@ class NNModel(CVModel):
 		:param iterable probe: List of probe samples
 		:param evaluation: Existing Evaluation to update. If None, new Evaluation will be created.
 		:type  evaluation: Evaluation or None
-		:param plot: Plotting function, taking a tuple (x, y, xlabel, ylabel, figure). If None, will not plot.
+		:param plot: Plotting function, taking a tuple (x, y, figure). If None, will not plot.
 		:type  plot: Callable or None
 		:param int verbose: Verbosity level. If nonzero, will print output. Also passed to underlying keras methods.
 
@@ -89,14 +89,14 @@ class NNModel(CVModel):
 		eer = evaluation.update_eer()
 		self._print(f"EER: {eer}")
 		if plot:
-			plot(threshold, far, "Threshold", "FAR", figure="EER")
-			plot(threshold, frr, "Threshold", "FRR", figure="EER")
+			plot(threshold, far, figure='EER')
+			plot(threshold, frr, figure='EER')
 
 		# AUC
 		auc = evaluation.update_auc()
 		self._print(f"AUC: {auc}")
 		if plot:
-			plot(far, 1 - frr, "FAR", "TAR", figure="ROC Curve")
+			plot(far, 1 - frr, figure='ROC Curve')
 
 		ver1far = evaluation.update_ver1far()
 		self._print(f"VER@1FAR: {ver1far}")

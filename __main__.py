@@ -10,6 +10,9 @@ from plot import Painter
 import utils
 
 
+K = 1
+
+
 # Recognition
 DATA_DIR = os.path.join(utils.get_rot_dir(), 'Recognition', 'all_directions_same_id')
 DATA = {'train': 'stage1', 'test': 'stage2'}
@@ -17,26 +20,30 @@ MODEL = 'ResNet'
 
 
 def main():
-	for layer in 'dense_1', 'final_features':
-		model = scleranet(layer)
-		CV(
-			model,
-			os.path.join(DATA_DIR, DATA['train']) if isinstance(model, TrainableNNModel) else None,
-			os.path.join(DATA_DIR, DATA['test']),
-			both_eyes_same_class=False,
-			mirrored_offset=0,
-			plot=True,
-			naming=r'ie_d_n',
-			directions=r'lrsu',
-			eyes=r'LR',
-			naming_strict=False,
-			group_by=None,#'age',
-			bins=(25, 40),
-			interbin_evaluation=False
-		)(
-			k=5,
-			gp_split=0.3
-		)
+	with Painter(k=2*K, lim=(0, 1.01), xticks=np.linspace(0.2, 1, 5), yticks=np.linspace(0, 1, 6)) as painter:
+		painter.add_figure('EER', xlabel='Threshold', ylabel='FAR/FRR')
+		painter.add_figure('ROC Curve', xlabel='FAR', ylabel='TAR')
+		for layer in 'dense_1', 'final_features':
+			model = scleranet(layer)
+
+			CV(
+				model,
+				os.path.join(DATA_DIR, DATA['train']) if isinstance(model, TrainableNNModel) else None,
+				os.path.join(DATA_DIR, DATA['test']),
+				both_eyes_same_class=False,
+				mirrored_offset=0,
+				naming=r'ie_d_n',
+				directions=r'lrsu',
+				eyes=r'LR',
+				naming_strict=False,
+				group_by=None,#'age',
+				bins=(25, 40),
+				interbin_evaluation=False
+			)(
+				k=K,
+				gp_split=0.3,
+				plot=painter
+			)
 
 
 # Configs

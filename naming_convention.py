@@ -1,16 +1,16 @@
 import re
 
-import cross_validate
+import dataset
 import utils
 
 
-L = (cross_validate.L, 'left', 'Left', 'LEFT', 'l', 'L')
-R = (cross_validate.R, 'right', 'Right', 'RIGHT', 'r', 'R')
-C = (cross_validate.C, 'center', 'Center', 'CENTER', 'c', 'C')
-U = (cross_validate.U, 'up', 'Up', 'UP', 'u', 'U')
+L = (dataset.L, 'left', 'Left', 'LEFT', 'l', 'L')
+R = (dataset.R, 'right', 'Right', 'RIGHT', 'r', 'R')
+C = (dataset.C, 'center', 'Center', 'CENTER', 'c', 'C')
+U = (dataset.U, 'up', 'Up', 'UP', 'u', 'U')
 
 
-class NamingHandler(object):
+class NamingParser(object):
 	def __init__(self, naming_re=None, naming=r'ie_d_n', eyes=r'LR', directions=r'lrsu', strict=False):
 		self.eyes = eyes
 		if isinstance(self.eyes, dict):
