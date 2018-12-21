@@ -62,7 +62,10 @@ class Metric(object):
 			self.update(values)
 
 	def __str__(self):
-		return f"{self.name} (\u03BC \u00B1 \u03C3): {self.mean} \u00B1 {self.std}"
+		if self.std:
+			return f"{self.name} (\u03BC \u00B1 \u03C3): {self.mean} \u00B1 {self.std}"
+		else:
+			return f"{self.name}: {self.mean}"
 
 	def __len__(self):
 		return self._n
@@ -93,8 +96,8 @@ def eer(far, frr, x):
 	x = (x[i], x[i + 1])
 	y = (far[i], far[i + 1], frr[i], frr[i + 1])
 	return (
-			((x[0] * y[1] - x[1] * y[0]) * (y[2] - y[3]) - (x[0] * y[3] - x[1] * y[2]) * (y[0] - y[1])) /
-			((x[0] - x[1]) * (-y[0] + y[1] + y[2] - y[3]))
+		((x[0] * y[1] - x[1] * y[0]) * (y[2] - y[3]) - (x[0] * y[3] - x[1] * y[2]) * (y[0] - y[1])) /
+		((x[0] - x[1]) * (-y[0] + y[1] + y[2] - y[3]))
 	)
 
 

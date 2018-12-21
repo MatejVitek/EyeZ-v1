@@ -5,38 +5,66 @@ from keras.models import load_model, Model
 from keras.optimizers import RMSprop, SGD
 
 from cross_validate import CV
+from dataset import Dataset, RatioSplit
 from model_wrapper import *
+from naming import NamingParser
 from plot import Painter
 import utils
 
 
-K = 1
+K = 2
 
 
 # Recognition
 DATA_DIR = os.path.join(utils.get_rot_dir(), 'Recognition', 'all_directions_same_id')
-DATA = {'train': 'stage1', 'test': 'stage2'}
+DATA = {'train': None, 'test': 'stage2'}
 MODEL = 'ResNet'
 
 
 def main():
-	with Painter(k=2*K, lim=(0, 1.01), xticks=np.linspace(0.2, 1, 5), yticks=np.linspace(0, 1, 6)) as painter:
-		painter.add_figure('EER', xlabel='Threshold', ylabel='FAR/FRR')
-		painter.add_figure('ROC Curve', xlabel='FAR', ylabel='TAR')
+	naming = NamingParser(
+		r'ie_d_n',
+		eyes=r'LR',
+		directions=r'lrsu',
+		strict=False
+	)
+	both_eyes_same_class = False
+	mirrored_offset = 0
+
+	train = None
+	if DATA['train']:
+		train = Dataset(
+			os.path.join(DATA_DIR, DATA['train']),
+			naming=naming,
+			both_eyes_same_class=both_eyes_same_class,
+			mirrored_offset=mirrored_offset
+		)
+	test = Dataset(
+		os.path.join(DATA_DIR, DATA['test']),
+		naming=naming,
+		both_eyes_same_class=both_eyes_same_class,
+		mirrored_offset=mirrored_offset
+	)
+
+	painter = Painter(
+		k=K,
+		lim=(0, 1.01),
+		xticks=np.linspace(0.2, 1, 5),
+		yticks=np.linspace(0, 1, 6)
+	)
+	painter.add_figure('EER', xlabel='Threshold', ylabel='FAR/FRR')
+	painter.add_figure('ROC Curve', xlabel='FAR', ylabel='TAR')
+
+	with painter:
 		for layer in 'dense_1', 'final_features':
 			model = scleranet(layer)
 
+			"""
 			CV(
 				model,
 				os.path.join(DATA_DIR, DATA['train']) if isinstance(model, TrainableNNModel) else None,
 				os.path.join(DATA_DIR, DATA['test']),
-				both_eyes_same_class=False,
-				mirrored_offset=0,
-				naming=r'ie_d_n',
-				directions=r'lrsu',
-				eyes=r'LR',
-				naming_strict=False,
-				group_by=None,#'age',
+				group_by='age',
 				bins=(25, 40),
 				interbin_evaluation=False
 			)(
@@ -44,6 +72,11 @@ def main():
 				gp_split=0.3,
 				plot=painter
 			)
+			"""
+
+			split = RatioSplit(test, 0.3)
+			model.evaluate(split.gallery, split.probe, plot=painter)
+			painter.next_color()
 
 
 # Configs

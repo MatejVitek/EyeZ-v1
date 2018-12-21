@@ -11,16 +11,16 @@ U = (dataset.U, 'up', 'Up', 'UP', 'u', 'U')
 
 
 class NamingParser(object):
-	def __init__(self, naming_re=None, naming=r'ie_d_n', eyes=r'LR', directions=r'lrsu', strict=False):
+	def __init__(self, naming=r'ie_d_n', naming_re=None, eyes=r'LR', directions=r'lrsu', strict=False):
 		self.eyes = eyes
 		if isinstance(self.eyes, dict):
-			self.eyes = ''.join(self.eyes[d] for d in L + R if d in self.eyes.keys())
+			self.eyes = ''.join(self.eyes[d] for d in L + R if d in self.eyes)
 		else:
 			self.eyes = ''.join(self.eyes)
 
 		self.directions = directions
 		if isinstance(self.directions, dict):
-			self.directions = ''.join(self.directions[d] for d in L + R + C + U if d in self.directions.keys())
+			self.directions = ''.join(self.directions[d] for d in L + R + C + U if d in self.directions)
 		else:
 			self.directions = ''.join(self.directions)
 
