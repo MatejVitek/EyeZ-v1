@@ -173,8 +173,8 @@ class CVSplit(object):
 			# Return a single fold
 			return self.folds[index]
 		except TypeError:
-			# Return multiple folds as a single flattened list
-			return list(itertools.chain.from_iterable(self.folds[i] for i in index))
+			# Return multiple folds as a single Dataset
+			return sum(self.folds[i] for i in index)
 
 	def __len__(self):
 		return len(self.folds)

@@ -1,6 +1,6 @@
-import os
+from collections import defaultdict
 
-from data_split import CVSplit, RatioSplit
+from dataset import Dataset, CVSplit, RatioSplit
 from model_wrapper import CVModel, TrainableNNModel
 from plot import Painter
 import utils
@@ -10,47 +10,43 @@ EXTRA_INFO = utils.get_id_info()
 
 
 class CV(object):
-	def __init__(self, model, train_dir, test_dir, **kw):
+	def __init__(self, model):
 		"""
 		Initializes a new cross-validation object
 
 		:param CVModel model: Predictor wrapped for evaluation
-		:param train_dir: Directory with training data (must adhere to keras structure). If None, no training will be done.
-		:type  train_dir: str or None
-		:param str test_dir: Directory with testing data (must adhere to keras structure)
-		:param bool crossbin_eval: Whether to use cross-bin evaluation in impostor testing
 		"""
 
-		# Model and directories
 		self.model = model
-		self.train_dir = train_dir
-		self.test_dir = test_dir
 
-		# If training directory was specified, model has to be trainable (uncomment after CVModel done)
-		if self.train_dir and not isinstance(self.model, TrainableNNModel):
-			raise ValueError("If training, model must be a subclass of TrainableNNModel")
-		
-		# Other settings
-		self.grp_cross_eval = kw.get('crossbin_eval')
+	def __call__(self, train, test, *args, **kw):
+		if isinstance(test, dict):
+			return self.cross_validate_grouped(train, test, *args, **kw)
+		else:
+			return self.cross_validate(train, test, *args, **kw)
 
-		# Uninitialized variables
-		self.tv_split = self.gp_split = None
-
-	def __call__(self, *args, **kw):
-		return self.cross_validate(*args, **kw)
-
-	def cross_validate(self, k=10, gp_split=0.3, plot=True):
+	def cross_validate(self, train, test, k=10, plot=True, evaluation=None, **kw):
 		"""
 		Cross validate model
 
-		:param k: Number of folds
-		:param gp_split: Gallery/probe split ratio
+		:param train: Dataset to train on. If None, only evaluation will be done.
+		:type  train: Dataset or CVSplit or None
+		:param test: Dataset to test on
+		:type  test: Dataset or GPSplit
+		:param int k: Number of folds
 		:param plot: Painter object to use or boolean value
 		:type  plot: Painter or bool or None
+		:param evaluation: If specified, will use this as the pre-existing evaluation
+		:type  evaluation: Evaluation or None
+		:param kw: Additional arguments to pass to :py:CVModel.evaluate
 
 		:return: Final evaluation
 		:rtype:  Evaluation
 		"""
+
+		# If training dataset was specified, model has to be trainable
+		if train and not isinstance(self.model, TrainableNNModel):
+			raise TypeError("If training, model must be a subclass of TrainableNNModel")
 
 		# Use default painter if unspecified
 		new_painter = plot is True
@@ -66,62 +62,74 @@ class CV(object):
 			k = 2
 			run_once = True
 
-		# Group data (only one group if no grouping done)
-		self.data = {t: [data] for (t, data) in self.data.items()}
+		# If train is passed as a Dataset, split it into k folds
+		if isinstance(train, Dataset):
+			train = CVSplit(train, k)
 
-		if self.train_dir:
-			if self.grp_by:
-				self.data['train'] = self._group_samples(self.data['train'][0])
-		else:
-			self.data['train'] = [None]
+		# If test is passed as a Dataset, split it into gallery and probe as 30:70
+		if isinstance(test, Dataset):
+			test = RatioSplit(test, 0.3)
 
-		if self.grp_by:
-			self.data['test'] = self._group_samples(self.data['test'][0])
+		for fold in range(k):
+			print(f"Fold {fold+1}:")
 
-		if len(self.data['test']) == 1 < len(self.data['train']):
-			self.data['test'] *= len(self.data['train'])
-		elif len(self.data['train']) == 1 < len(self.data['test']):
-			self.data['train'] *= len(self.data['test'])
-		if not self.bin_labels:
-			self.bin_labels = [None] * len(self.data['train'])
-		assert len(self.data['train']) == len(self.data['test']) == len(self.bin_labels)
+			if train:
+				train_data = train[(x for x in range(len(train)) if x != fold)]
+				val_data = train[fold]
+				self.model.train(train_data, val_data)
 
-		evaluation = None
-		for train_group, test_group, bin in zip(self.data['train'], self.data['test'], self.bin_labels):
-			if self.grp_by:
-				print(bin.format(self.grp_by if isinstance(self.grp_by, str) else "x") + ":")
+			test.new_split()
+			evaluation = self.model.evaluate(test.gallery, test.probe, evaluation=evaluation, plot=plot, **kw)
 
-			if self.train_dir:
-				self.tv_split = CVSplit(train_group, k)
-			self.gp_split = RatioSplit(test_group, gp_split)
+			if train:
+				self.model.reset()
 
-			for fold in range(k):
-				print(f"Fold {fold+1}:")
+			if plot:
+				plot.next_color()
 
-				if self.train_dir:
-					assert isinstance(self.model, TrainableNNModel)
-					train = self.tv_split[(x for x in range(len(self.tv_split)) if x != fold)]
-					val = self.tv_split[fold]
-					self.model.train(train, val)
-
-				self.gp_split.shuffle()
-				gallery = self.gp_split['gallery']
-				probe = self.gp_split['probe']
-				evaluation = self.model.evaluate(gallery, probe, evaluation, plot)
-
-				if self.train_dir:
-					self.model.reset()
-
-				if plot:
-					plot.next_color()
-
-				if run_once:
-					break
+			if run_once:
+				break
 
 		print("Final evaluation:")
 		print(evaluation)
 
 		if new_painter:
 			plot.finalize()
+
+		return evaluation
+
+	def cross_validate_grouped(self, train, test, *args, **kw):
+		"""
+		Cross validate a grouped dataset
+
+		:param train: Dictionary of training groups. If None, no training will be done.
+		:param test: Dictionary of testing groups. If train was specified, both should be of the same length.
+		:param args: Additional args to pass to :py:cross_validate
+		:param evaluation: If specified, will use this as the pre-existing evaluation. Cannot be used with return_separate.
+		:type  evaluation: Evaluation or None
+		:param bool return_separate: Whether to combine the result into one evaluation or return a dictionary
+		:param bool intergroup_evaluation: Whether to use samples from different groups for impostor testing
+		:param kw: Additional keyword args to pass to :py:cross_validate
+
+		:return: Final evaluation(s)
+		:rtype:  Evaluation
+		"""
+
+		return_separate = kw.pop('return_separate', False)
+		evaluation = kw.pop('evaluation', {} if return_separate else None)
+		inter_eval = kw.pop('intergroup_evaluation', False)
+
+		if return_separate and evaluation:
+			raise ValueError("return_separate and evaluation are mutually exclusive")
+
+		if not train:
+			train = defaultdict()
+
+		for label in test:
+			print(label)
+			if return_separate:
+				evaluation[label] = self.cross_validate(train[label], test[label], *args, evaluation=None, **kw)
+			else:
+				evaluation = self.cross_validate(train[label], test[label], *args, evaluation=evaluation, **kw)
 
 		return evaluation

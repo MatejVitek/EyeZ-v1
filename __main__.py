@@ -1,3 +1,4 @@
+import numpy as np
 import os
 
 from keras.applications import ResNet50
@@ -5,7 +6,7 @@ from keras.models import load_model, Model
 from keras.optimizers import RMSprop, SGD
 
 from cross_validate import CV
-from dataset import Dataset, RatioSplit
+from dataset import Dataset
 from model_wrapper import *
 from naming import NamingParser
 from plot import Painter
@@ -13,12 +14,12 @@ import utils
 
 
 K = 2
-
+GROUP_BY = 'age'
+BINS = (25, 40)
 
 # Recognition
 DATA_DIR = os.path.join(utils.get_rot_dir(), 'Recognition', 'all_directions_same_id')
 DATA = {'train': None, 'test': 'stage2'}
-MODEL = 'ResNet'
 
 
 def main():
@@ -39,12 +40,16 @@ def main():
 			both_eyes_same_class=both_eyes_same_class,
 			mirrored_offset=mirrored_offset
 		)
+		if GROUP_BY:
+			train = train.group_by(GROUP_BY, BINS)
 	test = Dataset(
 		os.path.join(DATA_DIR, DATA['test']),
 		naming=naming,
 		both_eyes_same_class=both_eyes_same_class,
 		mirrored_offset=mirrored_offset
 	)
+	if GROUP_BY:
+		test = test.group_by(GROUP_BY, BINS)
 
 	painter = Painter(
 		k=K,
@@ -58,25 +63,12 @@ def main():
 	with painter:
 		for layer in 'dense_1', 'final_features':
 			model = scleranet(layer)
-
-			"""
-			CV(
-				model,
-				os.path.join(DATA_DIR, DATA['train']) if isinstance(model, TrainableNNModel) else None,
-				os.path.join(DATA_DIR, DATA['test']),
-				group_by='age',
-				bins=(25, 40),
-				interbin_evaluation=False
-			)(
-				k=K,
-				gp_split=0.3,
+			CV(model)(
+				train,
+				test,
+				K,
 				plot=painter
 			)
-			"""
-
-			split = RatioSplit(test, 0.3)
-			model.evaluate(split.gallery, split.probe, plot=painter)
-			painter.next_color()
 
 
 # Configs

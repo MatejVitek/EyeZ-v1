@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-import numpy as np
 import scipy as sp
 
 from keras.layers import Dense, Flatten
@@ -23,7 +22,11 @@ class NNModel(CVModel):
 
 		:param model: Model to evaluate (should not include the softmax layer)
 		:param int batch_size: Batch size
-		:param distance: Distance metric for evaluation (passed to scipy.spacial.distance.cdist)
+		:param distance: Distance metric for evaluation (passed to scipy.spacial.distance.cdist).
+		                 Defaults to cosine distance.
+		:param distance_normalization: Function for distance normalization.
+				                       Defaults to f(d) = d/2 for 'cosine' and no normalization for anything else.
+				                       If given, the function should be executable on numpy arrays.
 		"""
 
 		# Base model settings
@@ -35,10 +38,11 @@ class NNModel(CVModel):
 		# Other settings
 		self.batch_size = kw.get('batch_size', 32)
 		self.dist = kw.get('distance') or kw.get('dist', 'cosine')
+		self.dist_norm = kw.get('distance_normalization', (lambda d: d/2) if self.dist == 'cosine' else None)
 
 		self.verbose = 0
 
-	def evaluate(self, gallery, probe, evaluation=None, plot=None, verbose=1):
+	def evaluate(self, gallery, probe, evaluation=None, **kw):
 		"""
 		Evaluate wrapped model
 
@@ -54,7 +58,9 @@ class NNModel(CVModel):
 		:rtype:  Evaluation
 		"""
 
-		self.verbose = verbose
+		plot = kw.pop('plot', None)
+		self.verbose = kw.pop('verbose', 1)
+
 		if not evaluation:
 			evaluation = Evaluation()
 		g_gen = ImageGenerator(
@@ -80,7 +86,9 @@ class NNModel(CVModel):
 		p_classes = [s.label for s in probe]
 
 		# rows = gallery, columns = probe
-		dist_matrix = np.absolute(sp.spatial.distance.cdist(g_features, p_features, metric=self.dist))
+		dist_matrix = sp.spatial.distance.cdist(g_features, p_features, metric=self.dist)
+		if self.dist_norm:
+			dist_matrix = self.dist_norm(dist_matrix)
 
 		# Get FAR and FRR
 		far, frr, threshold = evaluation.compute_error_rates(dist_matrix, g_classes, p_classes, n_points=5000)
