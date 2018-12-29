@@ -120,6 +120,9 @@ class CV(object):
 		if return_separate and evaluation:
 			raise ValueError("return_separate and evaluation are mutually exclusive")
 
+		if not train:
+			train = {}
+
 		for label in test:
 			print(label)
 			if return_separate:
