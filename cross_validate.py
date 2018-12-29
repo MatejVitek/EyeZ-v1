@@ -121,10 +121,10 @@ class CV(object):
 
 		if return_separate and evaluation:
 			raise ValueError("return_separate and evaluation are mutually exclusive")
-
+		print(train)
 		if not train:
 			train = defaultdict()
-
+		print(train)
 		for label in test:
 			print(label)
 			print(train[label])
