@@ -1,5 +1,3 @@
-from collections import defaultdict
-
 from dataset import Dataset, CVSplit, RatioSplit
 from model_wrapper import CVModel, TrainableNNModel
 from plot import Painter
@@ -121,17 +119,12 @@ class CV(object):
 
 		if return_separate and evaluation:
 			raise ValueError("return_separate and evaluation are mutually exclusive")
-		print(train)
-		if not train:
-			train = defaultdict()
-		print(train)
+
 		for label in test:
 			print(label)
-			print(train[label])
-			print(test[label])
 			if return_separate:
-				evaluation[label] = self.cross_validate(train[label], test[label], *args, evaluation=None, **kw)
+				evaluation[label] = self.cross_validate(train.get(label), test[label], *args, evaluation=None, **kw)
 			else:
-				evaluation = self.cross_validate(train[label], test[label], *args, evaluation=evaluation, **kw)
+				evaluation = self.cross_validate(train.get(label), test[label], *args, evaluation=evaluation, **kw)
 
 		return evaluation
