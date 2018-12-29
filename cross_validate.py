@@ -127,6 +127,8 @@ class CV(object):
 
 		for label in test:
 			print(label)
+			print(train[label])
+			print(test[label])
 			if return_separate:
 				evaluation[label] = self.cross_validate(train[label], test[label], *args, evaluation=None, **kw)
 			else:
