@@ -208,8 +208,8 @@ class RatioSplit(GPSplit):
 	def new_split(self, **kw):
 		split = round(kw.get('ratio', self.ratio) * len(self.dataset))
 		self.dataset.shuffle()
-		self.gallery = self._dataset(self.dataset[split:])
-		self.probe = self._dataset(self.dataset[:split])
+		self.gallery = self._dataset(self.dataset[:split])
+		self.probe = self._dataset(self.dataset[split:])
 		return self.gallery, self.probe
 
 
@@ -224,3 +224,4 @@ class AttributeSplit(GPSplit):
 		val = kw.get('value', self.value)
 		self.gallery = self._dataset([s for s in self.dataset if f(s) == val])
 		self.probe = self._dataset([s for s in self.dataset if f(s) != val])
+		return self.gallery, self.probe

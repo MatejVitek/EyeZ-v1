@@ -1,7 +1,15 @@
+from collections import defaultdict
+import getpass
 import os
 import platform
 import random
 import re
+import socket
+
+
+UNIX = defaultdict(lambda: ('/hdd', os.path.join('/media', getpass.getuser(), 'All Your Base')))
+WINDOWS = defaultdict(lambda: ('C:', 'D:', 'E:', 'F:', 'G:', 'H:'))
+# WINDOWS['Funny-Computer-Name'] = ('F:', 'G:', 'D:', 'E:')
 
 
 def multi_replace(string, replacements, ignore_case=False):
@@ -19,15 +27,11 @@ class Info(object):
 		self.color = color
 
 
-def get_disk_path(ext_disk_name=None, win_internal_drive='C:', win_external_drive='D:'):
-	windows = platform.system().lower() == 'windows'
-	if not ext_disk_name:
-		return win_internal_drive if windows else '/hdd'
-	return win_external_drive if windows else os.path.join('/media', os.getlogin(), ext_disk_name)
-
-
-def get_rot_dir(*args, **kwargs):
-	return os.path.join(get_disk_path(*args, **kwargs), 'EyeZ', 'Rot')
+def get_rot_dir():
+	pc_name = socket.gethostname()
+	for disk in (WINDOWS[pc_name] if platform.system().lower() == 'windows' else UNIX[pc_name]):
+		if os.path.isdir(os.path.join(disk, 'EyeZ')):
+			return os.path.join(disk, 'EyeZ', 'Rot')
 
 
 def get_id_info(path=os.path.join(get_rot_dir(), 'SBVP_Gender_Age_Color.txt')):
