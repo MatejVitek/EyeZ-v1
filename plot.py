@@ -1,16 +1,18 @@
+import itertools
 import matplotlib.pyplot as plt
 import matplotlib.ticker as tick
 import numpy as np
 
 
 class Figure(object):
-	def __init__(self, name, colors, **kw):
+	def __init__(self, name, colors, labels, **kw):
 		"""
 		Wrapper for a figure and its corresponding settings
 
 		:param name: Figure name
 		:type  name: str or int or None
 		:param colors: Color cycler
+		:param labels: Label cycler
 		:param save: Filename to save figure to. If None, figure won't be saved.
 		:type  save: str or None
 		:param str font_family: Name of font family to use for labels
@@ -39,6 +41,8 @@ class Figure(object):
 		self.name = name
 		self.colors = colors
 		self.color = next(self.colors)
+		self.labels = labels
+		self.label = next(self.labels)
 		self.settings = kw
 
 	def __call__(self, *args, **kw):
@@ -73,7 +77,14 @@ class Figure(object):
 		plt.figure(self.name)
 		plt.rcParams['font.family'] = cfg.get('font') or cfg.get('font_family', 'Times New Roman')
 		plt.rcParams['font.size'] = cfg.get('font_size', 30)
-		plt.plot(x, y, color=self.color, linewidth=(kw.get('linewidth') or cfg.get('linewidth', 2)), **kw)
+
+		plt.plot(
+			x, y,
+			color=self.color,
+			linewidth=(kw.get('linewidth') or cfg.get('linewidth', 2)),
+			label=self.label,
+			**kw
+		)
 
 		plt.xlabel(cfg.get('xlabel', ''))
 		plt.ylabel(cfg.get('ylabel', ''))
@@ -95,22 +106,24 @@ class Figure(object):
 			axis=cfg.get('grid_axis', 'both'),
 			**cfg.get('grid_kw', {})
 		)
-		if any('legend' in key for key in cfg):
-			plt.legend(loc=cfg.get('legend_loc', 'lower left'), fontsize=cfg.get('legend_size', 20))
+		if self.label:
+			plt.legend(loc=cfg.get('legend_loc', 'lower right'), fontsize=cfg.get('legend_size', 20))
 
 		plt.margins(cfg.get('margins', 0))
 		plt.tight_layout(pad=cfg.get('pad', 0))
 
-	def next_color(self):
+	def next(self):
 		self.color = next(self.colors)
+		self.label = next(self.labels)
 
 
 class Painter(object):
-	def __init__(self, colors='plasma', k=None, interactive=True, **kw):
+	def __init__(self, colors='viridis', labels=None, k=None, interactive=True, **kw):
 		"""
 		Class for drawing multiple plots to a figure (or multiple figures)
 
 		:param colors: Name of a colormap or a sequence of colors
+		:param labels: List of labels for plot legend. If None, no legend will be drawn.
 		:param k: Number of colors to sample from the colormap. If None, the entire colormap will be used.
 		:type  k: int or None
 		:param bool interactive: Should execution continue after drawing
@@ -119,6 +132,7 @@ class Painter(object):
 
 		self.figures = {}
 		self.colors = colors
+		self.labels = labels
 		self.k = k
 		self.interactive = interactive
 		self.default_settings = kw
@@ -164,13 +178,14 @@ class Painter(object):
 			plt.ioff()
 			plt.show()
 
-	def add_figure(self, figure=None, colors=None, k=0, **kw):
+	def add_figure(self, figure=None, colors=None, labels=0, k=0, **kw):
 		"""
 		Add a Figure context to the Painter object
 
 		:param figure: Figure name or number
 		:type  figure: str or int or None
 		:param colors: Name of a colormap or a sequence of colors. If None, Painter's default will be used.
+		:param labels: Sequence of labels. If 0, Painter's default will be used. If None, no legend will be drawn.
 		:param k: Number of colors to sample. If 0, Painter's default will be used. If None, all colors will be used.
 		:type  k: int or None
 		:param kw: Additional figure settings, overriding Painter's defaults (see :py:Figure)
@@ -181,11 +196,15 @@ class Painter(object):
 
 		if colors is None:
 			colors = self.colors
+		if labels == 0:
+			labels = self.labels
 		if k == 0:
 			k = self.k
-		colors = cycle(colors, k)
+		colors = cycle_colors(colors, k)
+		labels = itertools.cycle(labels) if labels else itertools.repeat(None)
+
 		kw.update((k, v) for (k, v) in self.default_settings.items() if k not in kw)
-		self[figure] = Figure(figure, colors, **kw)
+		self[figure] = Figure(figure, colors, labels, **kw)
 		return self[figure].init()
 
 	def draw(self, x, y, figure=None, figure_kw=None, **kw):
@@ -213,12 +232,12 @@ class Painter(object):
 		else:
 			plt.show()
 
-	def next_color(self):
+	def next(self):
 		for figure in self:
-			figure.next_color()
+			figure.next()
 
 
-def cycle(colors, k=None):
+def cycle_colors(colors, k=None):
 	if k is None:
 		try:
 			k = len(colors)

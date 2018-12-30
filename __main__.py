@@ -13,7 +13,7 @@ from plot import Painter
 import utils
 
 
-K = 2
+K = 1
 GROUP_BY = 'age'
 BINS = (25, 40)
 
@@ -52,23 +52,30 @@ def main():
 		test = test.group_by(GROUP_BY, BINS)
 
 	painter = Painter(
-		k=K,
 		lim=(0, 1.01),
 		xticks=np.linspace(0.2, 1, 5),
-		yticks=np.linspace(0, 1, 6)
+		yticks=np.linspace(0, 1, 6),
+		colors=['r', 'g', 'b'],
+		#k=(len(test) * K if GROUP_BY else K),
+		labels=([f'{key}' for key in test.keys()] if GROUP_BY else [k for k in range(K)])
 	)
 	painter.add_figure('EER', xlabel='Threshold', ylabel='FAR/FRR')
 	painter.add_figure('ROC Curve', xlabel='FAR', ylabel='TAR')
 
 	with painter:
-		for layer in 'dense_1', 'final_features':
-			model = scleranet(layer)
-			CV(model)(
-				train,
-				test,
-				K,
-				plot=painter
-			)
+		model = scleranet()
+		evaluation = CV(model)(
+			train,
+			test,
+			K,
+			plot=painter,
+			closest_only=True
+		)
+		if GROUP_BY:
+			for k, v in evaluation.items():
+				print(f'{k}:\n{str(v)}\n')
+		else:
+			print(evaluation)
 
 
 # Configs
@@ -102,7 +109,7 @@ def resnet50(train=True):
 	)
 
 
-def scleranet(layer='dense_1'):
+def scleranet(layer='final_features'):
 	model = load_model(os.path.join(utils.get_rot_dir(), 'Recognition', 'all_directions_same_id', 'models', 'id_dir_prediction.75-0.667.hdf5'))
 	return base_config(Model(model.input, [model.get_layer(layer).output]))
 

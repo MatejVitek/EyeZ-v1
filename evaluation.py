@@ -18,11 +18,11 @@ class Evaluation(object):
 	def all_metrics(self):
 		return [metric for metric in self.__dict__.values() if isinstance(metric, Metric)]
 
-	def compute_error_rates(self, dist_matrix, g_classes, p_classes, n_points=1000):
+	def compute_error_rates(self, dist_matrix, g_classes, p_classes, closest_only=False, n_points=5000):
 		self._threshold = np.linspace(dist_matrix.min(), dist_matrix.max(), n_points)#np.unique(dist_matrix)
 
-		same = np.array([d for ((g, p), d) in np.ndenumerate(dist_matrix) if g_classes[g] == p_classes[p]])
-		diff = np.array([d for ((g, p), d) in np.ndenumerate(dist_matrix) if g_classes[g] != p_classes[p]])
+		same = self._same(dist_matrix, g_classes, p_classes, closest_only)
+		diff = self._diff(dist_matrix, g_classes, p_classes, closest_only)
 
 		self._far = np.array([np.count_nonzero(diff <= t) / len(diff) for t in self._threshold])
 		self._frr = np.array([np.count_nonzero(same > t) / len(same) for t in self._threshold])
@@ -44,6 +44,33 @@ class Evaluation(object):
 		ver = ver_at_far(self._far, self._tar, self._threshold, 0.01)
 		self.ver1far.update(ver)
 		return ver
+
+	@staticmethod
+	def _same(dist_matrix, g_classes, p_classes, closest):
+		if not closest:
+			return np.array([d for ((g, p), d) in np.ndenumerate(dist_matrix) if g_classes[g] == p_classes[p]])
+		return np.array([
+			min(same)
+			for same in (
+				[d for g, d in enumerate(col) if g_classes[g] == p_classes[p]]
+				for p, col in enumerate(dist_matrix.T)
+			)
+			if same
+		])
+
+	@staticmethod
+	def _diff(dist_matrix, g_classes, p_classes, closest):
+		if not closest:
+			return np.array([d for ((g, p), d) in np.ndenumerate(dist_matrix) if g_classes[g] != p_classes[p]])
+		return np.array([
+			min(diff)
+			for diff in (
+				[d for g, d in enumerate(col) if g_classes[g] == diff_cls]
+				for p, col in enumerate(dist_matrix.T)
+				for diff_cls in set(g_classes) if diff_cls != p_classes[p]
+			)
+			if diff
+		])
 
 
 class Metric(object):

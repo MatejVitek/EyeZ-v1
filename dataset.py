@@ -115,10 +115,10 @@ class Dataset(object):
 		try:
 			all(bin <= float('inf') for bin in bins)
 
-			# If bin labels not given, use "left_bin_border <= by < right_bin_border"
+			# If bin labels not given, use "left_bin_border < by <= right_bin_border"
 			if not bin_labels:
 				bin_labels = [
-					((str(bins[i - 1]) + " > ") if i > 0 else "")
+					((str(bins[i - 1]) + " < ") if i > 0 else "")
 					+ f'{by}'
 					+ ((" <= " + str(bins[i])) if i < len(bins) else "")
 					for i in range(len(bins) + 1)
@@ -224,4 +224,26 @@ class AttributeSplit(GPSplit):
 		val = kw.get('value', self.value)
 		self.gallery = self._dataset([s for s in self.dataset if f(s) == val])
 		self.probe = self._dataset([s for s in self.dataset if f(s) != val])
+		return self.gallery, self.probe
+
+
+class BaseSplit(GPSplit):
+	def new_split(self):
+		self.dataset.shuffle()
+		g = []
+		p = []
+		base_ns = {}
+
+		for s in self.dataset:
+			if s.label in base_ns:
+				if s.n == base_ns[s.label]:
+					g.append(s)
+				else:
+					p.append(s)
+			else:
+				base_ns[s.label] = s.n
+				g.append(s)
+
+		self.gallery = self._dataset(g)
+		self.probe = self._dataset(p)
 		return self.gallery, self.probe

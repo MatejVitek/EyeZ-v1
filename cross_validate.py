@@ -1,4 +1,4 @@
-from dataset import Dataset, CVSplit, RatioSplit
+from dataset import Dataset, CVSplit, BaseSplit
 from model_wrapper import CVModel, TrainableNNModel
 from plot import Painter
 import utils
@@ -23,7 +23,7 @@ class CV(object):
 		else:
 			return self.cross_validate(train, test, *args, **kw)
 
-	def cross_validate(self, train, test, k=10, plot=True, evaluation=None, **kw):
+	def cross_validate(self, train, test, k=10, plot=False, evaluation=None, **kw):
 		"""
 		Cross validate model
 
@@ -64,9 +64,9 @@ class CV(object):
 		if isinstance(train, Dataset):
 			train = CVSplit(train, k)
 
-		# If test is passed as a Dataset, split it into gallery and probe as 30:70
+		# If test is passed as a Dataset, split into base and verification attempts
 		if isinstance(test, Dataset):
-			test = RatioSplit(test, 0.3)
+			test = BaseSplit(test)
 
 		for fold in range(k):
 			print(f"Fold {fold+1}:")
@@ -83,13 +83,10 @@ class CV(object):
 				self.model.reset()
 
 			if plot:
-				plot.next_color()
+				plot.next()
 
 			if run_once:
 				break
-
-		print("Final evaluation:")
-		print(evaluation)
 
 		if new_painter:
 			plot.finalize()
@@ -103,31 +100,20 @@ class CV(object):
 		:param train: Dictionary of training groups. If None, no training will be done.
 		:param test: Dictionary of testing groups. If train was specified, both should be of the same length.
 		:param args: Additional args to pass to :py:cross_validate
-		:param evaluation: If specified, will use this as the pre-existing evaluation. Cannot be used with return_separate.
-		:type  evaluation: Evaluation or None
-		:param bool return_separate: Whether to combine the result into one evaluation or return a dictionary
 		:param bool intergroup_evaluation: Whether to use samples from different groups for impostor testing
 		:param kw: Additional keyword args to pass to :py:cross_validate
 
-		:return: Final evaluation(s)
-		:rtype:  Evaluation
+		:return: Final evaluations
 		"""
 
-		return_separate = kw.pop('return_separate', False)
-		evaluation = kw.pop('evaluation', {} if return_separate else None)
 		inter_eval = kw.pop('intergroup_evaluation', False)
-
-		if return_separate and evaluation:
-			raise ValueError("return_separate and evaluation are mutually exclusive")
 
 		if not train:
 			train = {}
 
+		evaluation = {}
 		for label in test:
 			print(label)
-			if return_separate:
-				evaluation[label] = self.cross_validate(train.get(label), test[label], *args, evaluation=None, **kw)
-			else:
-				evaluation = self.cross_validate(train.get(label), test[label], *args, evaluation=evaluation, **kw)
+			evaluation[label] = self.cross_validate(train.get(label), test[label], *args, evaluation=None, **kw)
 
 		return evaluation

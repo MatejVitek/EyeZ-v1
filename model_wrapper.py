@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import numpy as np
 import scipy as sp
 
 from keras.layers import Dense, Flatten
@@ -53,6 +54,7 @@ class NNModel(CVModel):
 		:param plot: Plotting function, taking a tuple (x, y, figure). If None, will not plot.
 		:type  plot: Callable or None
 		:param int verbose: Verbosity level. If nonzero, will print output. Also passed to underlying keras methods.
+		:param kw: Keyword arguments to pass to :py:evaluation.compute_error_rates
 
 		:return: Evaluation updated with newly computed metrics
 		:rtype:  Evaluation
@@ -91,7 +93,7 @@ class NNModel(CVModel):
 			dist_matrix = self.dist_norm(dist_matrix)
 
 		# Get FAR and FRR
-		far, frr, threshold = evaluation.compute_error_rates(dist_matrix, g_classes, p_classes, n_points=5000)
+		far, frr, threshold = evaluation.compute_error_rates(dist_matrix, g_classes, p_classes, **kw)
 
 		# EER
 		eer = evaluation.update_eer()
