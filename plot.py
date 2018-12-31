@@ -82,7 +82,7 @@ class Figure(object):
 			x, y,
 			color=self.color,
 			linewidth=(kw.get('linewidth') or cfg.get('linewidth', 2)),
-			label=self.label,
+			label=kw.pop('label', self.label),
 			**kw
 		)
 

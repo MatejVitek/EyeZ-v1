@@ -16,6 +16,8 @@ import utils
 K = 1
 GROUP_BY = 'age'
 BINS = (25, 40)
+INTERGROUP = True
+
 
 # Recognition
 DATA_DIR = os.path.join(utils.get_rot_dir(), 'Recognition', 'all_directions_same_id')
@@ -60,7 +62,7 @@ def main():
 		labels=([f'{key}' for key in test.keys()] if GROUP_BY else [k for k in range(K)])
 	)
 	painter.add_figure('EER', xlabel='Threshold', ylabel='FAR/FRR')
-	painter.add_figure('ROC Curve', xlabel='FAR', ylabel='TAR')
+	painter.add_figure('ROC Curve', xlabel='FAR', ylabel='TAR', save='Sclera-ROC2.eps')
 
 	with painter:
 		model = scleranet()
@@ -69,7 +71,8 @@ def main():
 			test,
 			K,
 			plot=painter,
-			closest_only=True
+			closest_only=True,
+			intergroup_evaluation=True
 		)
 		if GROUP_BY:
 			for k, v in evaluation.items():
@@ -85,7 +88,7 @@ DIST = 'cosine'
 
 def base_config(model, train=False, feature_size=None, first_unfreeze=None):
 	if train:
-		return TrainableNNModel(
+		return TrainablePredictorModel(
 			model,
 			primary_epochs=30,
 			secondary_epochs=10,
@@ -97,7 +100,7 @@ def base_config(model, train=False, feature_size=None, first_unfreeze=None):
 			distance=DIST
 		)
 	else:
-		return NNModel(model, batch_size=BATCH_SIZE, distance=DIST)
+		return PredictorModel(model, batch_size=BATCH_SIZE, distance=DIST)
 
 
 def resnet50(train=True):

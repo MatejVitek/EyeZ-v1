@@ -51,7 +51,7 @@ class Dataset(object):
 		                            If 0, mirrored eyes will be counted as distinct classes.
 		"""
 
-		if dir and data or not dir and not data:
+		if dir and data or dir is None and data is None:
 			raise ValueError("Exactly one of dir/data should be passed to the Dataset constructor.")
 
 		self.settings = kw
@@ -174,7 +174,7 @@ class CVSplit(object):
 			return self.folds[index]
 		except TypeError:
 			# Return multiple folds as a single Dataset
-			return sum(self.folds[i] for i in index)
+			return sum((self.folds[i] for i in index), Dataset(data=[]))
 
 	def __len__(self):
 		return len(self.folds)

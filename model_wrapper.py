@@ -11,39 +11,11 @@ from image_generators import ImageGenerator, LabeledImageGenerator
 
 
 class CVModel(ABC):
-	@abstractmethod
-	def evaluate(self, gallery, probe, evaluation=None):
-		pass
-
-
-class NNModel(CVModel):
-	def __init__(self, model, **kw):
-		"""
-		NN model wrapper for cross-validation
-
-		:param model: Model to evaluate (should not include the softmax layer)
-		:param int batch_size: Batch size
-		:param distance: Distance metric for evaluation (passed to scipy.spacial.distance.cdist).
-		                 Defaults to cosine distance.
-		:param distance_normalization: Function for distance normalization.
-				                       Defaults to f(d) = d/2 for 'cosine' and no normalization for anything else.
-				                       If given, the function should be executable on numpy arrays.
-		"""
-
-		# Base model settings
+	def __init__(self, model):
 		self.model = model
-		self.input_size = self.model.input_shape[1:3]
-		if any(size is None for size in self.input_size):
-			self.input_size = (256, 256)
+		self.verbose = None
 
-		# Other settings
-		self.batch_size = kw.get('batch_size', 32)
-		self.dist = kw.get('distance') or kw.get('dist', 'cosine')
-		self.dist_norm = kw.get('distance_normalization', (lambda d: d/2) if self.dist == 'cosine' else None)
-
-		self.verbose = 0
-
-	def evaluate(self, gallery, probe, evaluation=None, **kw):
+	def evaluate(self, gallery, probe, evaluation=None, impostors=None, plot=None, verbose=1, **kw):
 		"""
 		Evaluate wrapped model
 
@@ -51,56 +23,38 @@ class NNModel(CVModel):
 		:param iterable probe: List of probe samples
 		:param evaluation: Existing Evaluation to update. If None, new Evaluation will be created.
 		:type  evaluation: Evaluation or None
+		:param impostors: Dataset for impostor verification attempts in evaluation. If None, full G/P testing will be used.
+		:type  impostors: Dataset or None
 		:param plot: Plotting function, taking a tuple (x, y, figure). If None, will not plot.
 		:type  plot: Callable or None
-		:param int verbose: Verbosity level. If nonzero, will print output. Also passed to underlying keras methods.
+		:param int verbose: Verbosity level
 		:param kw: Keyword arguments to pass to :py:evaluation.compute_error_rates
 
 		:return: Evaluation updated with newly computed metrics
 		:rtype:  Evaluation
 		"""
 
-		plot = kw.pop('plot', None)
-		self.verbose = kw.pop('verbose', 1)
-
+		self.verbose = verbose
 		if not evaluation:
 			evaluation = Evaluation()
-		g_gen = ImageGenerator(
-			gallery,
-			target_size=self.input_size,
-			batch_size=self.batch_size,
-			shuffle=False
-		)
-		p_gen = ImageGenerator(
-			probe,
-			target_size=self.input_size,
-			batch_size=self.batch_size,
-			shuffle=False
-		)
-
-		# rows = samples, columns = features
-		self._print("Predicting gallery features:")
-		g_features = self.model.predict_generator(g_gen, verbose=self.verbose)
-		self._print("Predicting probe features:")
-		p_features = self.model.predict_generator(p_gen, verbose=self.verbose)
-
-		g_classes = [s.label for s in gallery]
-		p_classes = [s.label for s in probe]
-
-		# rows = gallery, columns = probe
-		dist_matrix = sp.spatial.distance.cdist(g_features, p_features, metric=self.dist)
-		if self.dist_norm:
-			dist_matrix = self.dist_norm(dist_matrix)
 
 		# Get FAR and FRR
-		far, frr, threshold = evaluation.compute_error_rates(dist_matrix, g_classes, p_classes, **kw)
+		dist_matrix, g_classes, p_classes, imp_matrix, imp_classes = self.dist_and_imp_matrix(gallery, probe, impostors)
+		far, frr, threshold = evaluation.compute_error_rates(
+			dist_matrix,
+			g_classes,
+			p_classes,
+			impostor_matrix=imp_matrix,
+			impostor_classes=imp_classes,
+			**kw
+		)
 
 		# EER
 		eer = evaluation.update_eer()
 		self._print(f"EER: {eer}")
 		if plot:
 			plot(threshold, far, figure='EER')
-			plot(threshold, frr, figure='EER')
+			plot(threshold, frr, figure='EER', label=None)
 
 		# AUC
 		auc = evaluation.update_auc()
@@ -113,12 +67,68 @@ class NNModel(CVModel):
 
 		return evaluation
 
+	@abstractmethod
+	def dist_and_imp_matrix(self, gallery, probe, impostors):
+		pass
+
 	def _print(self, s):
 		if self.verbose:
 			print(s)
 
 
-class TrainableNNModel(NNModel):
+class PredictorModel(CVModel):
+	def __init__(self, model, batch_size=32, **kw):
+		"""
+		NN model wrapper
+
+		:param model: NN model to evaluate (should not include the softmax layer)
+		:param int batch_size: Batch size
+		:param distance: Distance metric for feature vector comparison (passed to scipy.spacial.distance.cdist).
+		                 Defaults to cosine distance.
+		:param distance_normalization: Function for distance normalization.
+				                       Defaults to f(d) = d/2 for 'cosine' and no normalization for anything else.
+				                       If given, the function should be executable on numpy arrays.
+		"""
+
+		super().__init__(model)
+
+		# Base model settings
+		self.input_size = self.model.input_shape[1:3]
+		if any(size is None for size in self.input_size):
+			self.input_size = (256, 256)
+
+		# Other settings
+		self.batch_size = batch_size
+		self.dist = kw.pop('distance') or kw.pop('dist', 'cosine')
+		self.dist_norm = kw.pop('distance_normalization', (lambda d: d/2) if self.dist == 'cosine' else None)
+
+	def dist_and_imp_matrix(self, gallery, probe, impostors):
+		g_features = self.predict(gallery, "gallery")
+		p_features = self.predict(probe, "probe")
+		g_classes = [s.label for s in gallery]
+		p_classes = [s.label for s in probe]
+		dist_matrix = sp.spatial.distance.cdist(g_features, p_features, metric=self.dist)
+
+		imp_matrix, imp_classes = None, None
+		if impostors:
+			imp_features = self.predict(impostors, "impostor")
+			imp_classes = [s.label for s in impostors]
+			imp_matrix = sp.spatial.distance.cdist(g_features, imp_features, metric=self.dist)
+
+		return dist_matrix, g_classes, p_classes, imp_matrix, imp_classes
+
+	def predict(self, data, name="unknown"):
+		self._print(f"Predicting {name} features:")
+		gen = ImageGenerator(
+			data,
+			target_size=self.input_size,
+			batch_size=self.batch_size,
+			shuffle=False
+		)
+		return self.model.predict_generator(gen, verbose=self.verbose)
+
+
+class TrainablePredictorModel(PredictorModel):
 	def __init__(self, model, **kw):
 		"""
 		Wrapper for a trainable model for CV

@@ -18,11 +18,16 @@ class Evaluation(object):
 	def all_metrics(self):
 		return [metric for metric in self.__dict__.values() if isinstance(metric, Metric)]
 
-	def compute_error_rates(self, dist_matrix, g_classes, p_classes, closest_only=False, n_points=5000):
+	def compute_error_rates(self, dist_matrix, g_classes, p_classes, **kw):
+		closest_only = kw.get('closest_only', False)
+		imp_matrix = kw.get('impostor_matrix', dist_matrix)
+		imp_classes = kw.get('impostor_classes', p_classes)
+		n_points = kw.get('n_points', 5000)
+
 		self._threshold = np.linspace(dist_matrix.min(), dist_matrix.max(), n_points)#np.unique(dist_matrix)
 
 		same = self._same(dist_matrix, g_classes, p_classes, closest_only)
-		diff = self._diff(dist_matrix, g_classes, p_classes, closest_only)
+		diff = self._diff(imp_matrix, g_classes, imp_classes, closest_only)
 
 		self._far = np.array([np.count_nonzero(diff <= t) / len(diff) for t in self._threshold])
 		self._frr = np.array([np.count_nonzero(same > t) / len(same) for t in self._threshold])

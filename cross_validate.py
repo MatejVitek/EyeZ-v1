@@ -1,5 +1,5 @@
 from dataset import Dataset, CVSplit, BaseSplit
-from model_wrapper import CVModel, TrainableNNModel
+from model_wrapper import CVModel, TrainablePredictorModel
 from plot import Painter
 import utils
 
@@ -43,8 +43,8 @@ class CV(object):
 		"""
 
 		# If training dataset was specified, model has to be trainable
-		if train and not isinstance(self.model, TrainableNNModel):
-			raise TypeError("If training, model must be a subclass of TrainableNNModel")
+		if train and not isinstance(self.model, TrainablePredictorModel):
+			raise TypeError("If training, model must be a subclass of TrainablePredictorModel")
 
 		# Use default painter if unspecified
 		new_painter = plot is True
@@ -108,12 +108,19 @@ class CV(object):
 
 		inter_eval = kw.pop('intergroup_evaluation', False)
 
+		impostors = None
+		if inter_eval:
+			impostors = {
+				label: sum((d for d in test.values() if d != dataset), Dataset(data=[]))
+				for label, dataset in test.items()
+			}
+
 		if not train:
 			train = {}
 
 		evaluation = {}
 		for label in test:
 			print(label)
-			evaluation[label] = self.cross_validate(train.get(label), test[label], *args, evaluation=None, **kw)
+			evaluation[label] = self.cross_validate(train.get(label), test[label], *args, impostors=impostors.get(label), **kw)
 
 		return evaluation
