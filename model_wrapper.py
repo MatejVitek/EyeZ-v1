@@ -1,10 +1,13 @@
 from abc import ABC, abstractmethod
+import itertools
 import numpy as np
+import pickle
 import scipy as sp
+from tqdm import tqdm
 
-from keras.layers import Dense, Flatten
+from keras.layers import Dense
 from keras.models import Sequential
-from keras.optimizers import SGD, RMSprop
+from keras.optimizers import SGD
 
 from evaluation import Evaluation
 from image_generators import ImageGenerator, LabeledImageGenerator
@@ -15,7 +18,7 @@ class CVModel(ABC):
 		self.model = model
 		self.verbose = None
 
-	def evaluate(self, gallery, probe, evaluation=None, impostors=None, plot=None, verbose=1, **kw):
+	def evaluate(self, gallery, probe, evaluation=None, impostors=None, plot=None, verbose=1, save=None, **kw):
 		"""
 		Evaluate wrapped model
 
@@ -28,6 +31,8 @@ class CVModel(ABC):
 		:param plot: Plotting function, taking a tuple (x, y, figure). If None, will not plot.
 		:type  plot: Callable or None
 		:param int verbose: Verbosity level
+		:param save: File to save distance matrix info to
+		:type  save: str or None
 		:param kw: Keyword arguments to pass to :py:evaluation.compute_error_rates
 
 		:return: Evaluation updated with newly computed metrics
@@ -39,7 +44,20 @@ class CVModel(ABC):
 			evaluation = Evaluation()
 
 		# Get FAR and FRR
-		dist_matrix, g_classes, p_classes, imp_matrix, imp_classes = self.dist_and_imp_matrix(gallery, probe, impostors)
+		dist_matrix, imp_matrix = self.dist_and_imp_matrix(gallery, probe, impostors)
+		g_classes = self.classes(gallery)
+		p_classes = self.classes(probe)
+		imp_classes = self.classes(impostors)
+
+		# Save dist_matrix and imp_matrix info
+		if save:
+			with open(save, 'wb') as f:
+				pickle.dump(dist_matrix, f)
+				pickle.dump(imp_matrix, f)
+				pickle.dump(g_classes, f)
+				pickle.dump(p_classes, f)
+				pickle.dump(imp_classes, f)
+
 		far, frr, threshold = evaluation.compute_error_rates(
 			dist_matrix,
 			g_classes,
@@ -67,13 +85,63 @@ class CVModel(ABC):
 
 		return evaluation
 
+	def dist_and_imp_matrix(self, gallery, probe, impostors=None):
+		if not impostors:
+			return self.dist_matrix(gallery, probe), None
+		return self._dist_and_imp_matrix(gallery, probe, impostors)
+
 	@abstractmethod
-	def dist_and_imp_matrix(self, gallery, probe, impostors):
+	def dist_matrix(self, gallery, probe):
 		pass
+
+	@abstractmethod
+	def _dist_and_imp_matrix(self, gallery, probe, impostors):
+		pass
+
+	@staticmethod
+	def classes(samples):
+		return [s.label for s in samples] if samples else None
 
 	def _print(self, s):
 		if self.verbose:
 			print(s)
+
+
+class DirectDistanceModel(CVModel):
+	def __init__(self, model):
+		"""
+		Wrapper for models that only calculate distances between images (such as SIFT)
+
+		:param DistModel model: wrapped model
+		"""
+
+		super().__init__(model)
+
+	def _dist_and_imp_matrix(self, gallery, probe, impostors):
+		self._print("Gallery & probe")
+		dist_matrix = self.dist_matrix(gallery, probe)
+		self._print("Gallery & impostors")
+		imp_matrix = self.dist_matrix(gallery, impostors)
+		return dist_matrix, imp_matrix
+
+	def dist_matrix(self, gallery, probe):
+		self._print("Computing distance matrix")
+		dist_matrix = np.empty((len(gallery), len(probe)))
+
+		# To take advantage of caching in DistModel, iterate over square sub-matrices in the distance matrix
+		sq = self.model.size // 2
+		dm_idx = [
+			(g, p)
+			for g_s, p_s in itertools.product(range(0, len(gallery), sq), range(0, len(probe), sq))
+			for g, p in itertools.product(range(g_s, min(g_s + sq, len(gallery))), range(p_s, min(p_s + sq, len(probe))))
+		]
+		if self.verbose:
+			dm_idx = tqdm(dm_idx)
+
+		for g, p in dm_idx:
+			dist_matrix[g, p] = self.model.distance(gallery[g], probe[p])
+
+		return dist_matrix
 
 
 class PredictorModel(CVModel):
@@ -90,9 +158,8 @@ class PredictorModel(CVModel):
 				                       If given, the function should be executable on numpy arrays.
 		"""
 
-		super().__init__(model)
-
 		# Base model settings
+		super().__init__(model)
 		self.input_size = self.model.input_shape[1:3]
 		if any(size is None for size in self.input_size):
 			self.input_size = (256, 256)
@@ -102,20 +169,23 @@ class PredictorModel(CVModel):
 		self.dist = kw.pop('distance') or kw.pop('dist', 'cosine')
 		self.dist_norm = kw.pop('distance_normalization', (lambda d: d/2) if self.dist == 'cosine' else None)
 
-	def dist_and_imp_matrix(self, gallery, probe, impostors):
+	def _dist_and_imp_matrix(self, gallery, probe, impostors):
 		g_features = self.predict(gallery, "gallery")
 		p_features = self.predict(probe, "probe")
-		g_classes = [s.label for s in gallery]
-		p_classes = [s.label for s in probe]
-		dist_matrix = sp.spatial.distance.cdist(g_features, p_features, metric=self.dist)
+		dist_matrix = self._dist_matrix(g_features, p_features)
 
-		imp_matrix, imp_classes = None, None
-		if impostors:
-			imp_features = self.predict(impostors, "impostor")
-			imp_classes = [s.label for s in impostors]
-			imp_matrix = sp.spatial.distance.cdist(g_features, imp_features, metric=self.dist)
+		imp_features = self.predict(impostors, "impostor")
+		imp_matrix = self._dist_matrix(g_features, imp_features)
 
-		return dist_matrix, g_classes, p_classes, imp_matrix, imp_classes
+		return dist_matrix, imp_matrix
+
+	def dist_matrix(self, gallery, probe):
+		g_features = self.predict(gallery, "gallery")
+		p_features = self.predict(probe, "probe")
+		return self._dist_matrix(g_features, p_features)
+
+	def _dist_matrix(self, g_features, p_features):
+		return sp.spatial.distance.cdist(g_features, p_features, metric=self.dist)
 
 	def predict(self, data, name="unknown"):
 		self._print(f"Predicting {name} features:")
@@ -131,7 +201,7 @@ class PredictorModel(CVModel):
 class TrainablePredictorModel(PredictorModel):
 	def __init__(self, model, **kw):
 		"""
-		Wrapper for a trainable model for CV
+		Wrapper for a trainable model for CV. Additional parameters (see also :py:PredictorModel.__init__):
 
 		:param int primary_epochs: Epochs to train top layers only
 		:param int secondary_epochs: Epochs to train unfrozen layers and top layers

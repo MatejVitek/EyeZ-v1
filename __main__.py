@@ -1,20 +1,21 @@
-import numpy as np
 import os
 
 from keras.applications import ResNet50
 from keras.models import load_model, Model
-from keras.optimizers import RMSprop, SGD
+from keras.optimizers import RMSprop
 
 from cross_validate import CV
 from dataset import Dataset
+from dist_models import SIFT
 from model_wrapper import *
 from naming import NamingParser
 from plot import Painter
 import utils
 
 
-K = 1
-GROUP_BY = 'age'
+K = 10
+GROUP_BY = None
+#GROUP_BY = 'age'
 BINS = (25, 40)
 INTERGROUP = True
 
@@ -53,32 +54,35 @@ def main():
 	if GROUP_BY:
 		test = test.group_by(GROUP_BY, BINS)
 
+	models = (sift(),)
+
 	painter = Painter(
 		lim=(0, 1.01),
 		xticks=np.linspace(0.2, 1, 5),
 		yticks=np.linspace(0, 1, 6),
-		colors=['r', 'g', 'b'],
-		#k=(len(test) * K if GROUP_BY else K),
+		#colors=['r', 'b', 'g'],
+		k=len(test) * K * len(models) if GROUP_BY else K * len(models),
 		labels=([f'{key}' for key in test.keys()] if GROUP_BY else [k for k in range(K)])
+		#labels=["CNN", "SIFT"]
 	)
 	painter.add_figure('EER', xlabel='Threshold', ylabel='FAR/FRR')
-	painter.add_figure('ROC Curve', xlabel='FAR', ylabel='TAR', save='Sclera-ROC2.eps')
+	painter.add_figure('ROC Curve', xlabel='FAR', ylabel='TAR', save='Sclera-ROC.eps')
 
 	with painter:
-		model = scleranet()
-		evaluation = CV(model)(
-			train,
-			test,
-			K,
-			plot=painter,
-			closest_only=True,
-			intergroup_evaluation=True
-		)
-		if GROUP_BY:
-			for k, v in evaluation.items():
-				print(f'{k}:\n{str(v)}\n')
-		else:
-			print(evaluation)
+		for model in models:
+			evaluation = CV(model)(
+				train,
+				test,
+				K,
+				plot=painter,
+				closest_only=True,
+				intergroup_evaluation=True
+			)
+			if GROUP_BY:
+				for k, v in evaluation.items():
+					print(f'{k}:\n{str(v)}\n')
+			else:
+				print(evaluation)
 
 
 # Configs
@@ -115,6 +119,10 @@ def resnet50(train=True):
 def scleranet(layer='final_features'):
 	model = load_model(os.path.join(utils.get_rot_dir(), 'Recognition', 'all_directions_same_id', 'models', 'id_dir_prediction.75-0.667.hdf5'))
 	return base_config(Model(model.input, [model.get_layer(layer).output]))
+
+
+def sift(*args, **kw):
+	return DirectDistanceModel(SIFT(*args, **kw))
 
 
 main()

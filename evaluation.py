@@ -20,8 +20,8 @@ class Evaluation(object):
 
 	def compute_error_rates(self, dist_matrix, g_classes, p_classes, **kw):
 		closest_only = kw.get('closest_only', False)
-		imp_matrix = kw.get('impostor_matrix', dist_matrix)
-		imp_classes = kw.get('impostor_classes', p_classes)
+		imp_matrix = kw.get('impostor_matrix') or dist_matrix
+		imp_classes = kw.get('impostor_classes') or p_classes
 		n_points = kw.get('n_points', 5000)
 
 		self._threshold = np.linspace(dist_matrix.min(), dist_matrix.max(), n_points)#np.unique(dist_matrix)
