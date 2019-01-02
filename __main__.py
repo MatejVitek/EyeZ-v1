@@ -54,7 +54,7 @@ def main():
 	if GROUP_BY:
 		test = test.group_by(GROUP_BY, BINS)
 
-	models = (sift(),)
+	models = (scleranet(), sift())
 
 	painter = Painter(
 		lim=(0, 1.01),
@@ -62,7 +62,11 @@ def main():
 		yticks=np.linspace(0, 1, 6),
 		#colors=['r', 'b', 'g'],
 		k=len(test) * K * len(models) if GROUP_BY else K * len(models),
-		labels=([f'{key}' for key in test.keys()] if GROUP_BY else [k for k in range(K)])
+		labels=(
+			[f"{key} (k = {k})" for key in test.keys() for k in range(K)] if GROUP_BY and K > 1
+			else [f"{key}" for key in test.keys()] if GROUP_BY
+			else [f"k = {k}" for k in range(K)]
+		)
 		#labels=["CNN", "SIFT"]
 	)
 	painter.add_figure('EER', xlabel='Threshold', ylabel='FAR/FRR')
