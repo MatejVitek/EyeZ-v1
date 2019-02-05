@@ -1,4 +1,5 @@
 import itertools
+from matplotlib.colors import hsv_to_rgb
 import matplotlib.pyplot as plt
 import matplotlib.ticker as tick
 import numpy as np
@@ -118,7 +119,7 @@ class Figure(object):
 
 
 class Painter(object):
-	def __init__(self, colors='viridis', labels=None, k=None, interactive=True, **kw):
+	def __init__(self, colors='hsv', labels=None, k=None, interactive=True, **kw):
 		"""
 		Class for drawing multiple plots to a figure (or multiple figures)
 
@@ -238,15 +239,24 @@ class Painter(object):
 
 
 def cycle_colors(colors, k=None):
+	# Determine correct k if unspecified
 	if k is None:
 		try:
 			k = len(colors)
 		except TypeError:
 			k = 256
+
+	# HSV-uniform colormap
+	if colors.lower() in ('hsv', 'uniform', 'hsvuniform', 'hsv-uniform', 'hsv_uniform'):
+		colors = [hsv_to_rgb((h, 1, 1)) for h in np.linspace(0, 1, k, endpoint=False)]
+	
+	# Other colormaps
 	try:
 		colors = plt.cm.get_cmap(colors)(np.linspace(0, 1, k))
 		while True:
 			yield from colors
+
+	# Yield from array of colors (either passed as argument or defined above in HSV)
 	except (TypeError, ValueError):
 		while True:
 			idx = np.linspace(0, len(colors), k, endpoint=False, dtype=int)
