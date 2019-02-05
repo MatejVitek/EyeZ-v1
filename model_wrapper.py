@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 import itertools
 import numpy as np
+import os
 import pickle
 import scipy as sp
 from tqdm import tqdm
@@ -18,7 +19,7 @@ class CVModel(ABC):
 		self.model = model
 		self.verbose = None
 
-	def evaluate(self, gallery, probe, evaluation=None, impostors=None, plot=None, verbose=1, save=None, **kw):
+	def evaluate(self, gallery, probe, evaluation=None, impostors=None, plot=None, verbose=1, save=None, use_precomputed=False, **kw):
 		"""
 		Evaluate wrapped model
 
@@ -33,6 +34,7 @@ class CVModel(ABC):
 		:param int verbose: Verbosity level
 		:param save: File to save distance matrix info to
 		:type  save: str or None
+		:param bool use_precomputed: Whether to load saved distance matrix info. If True, should also pass save name.
 		:param kw: Keyword arguments to pass to :py:evaluation.compute_error_rates
 
 		:return: Evaluation updated with newly computed metrics
@@ -43,14 +45,29 @@ class CVModel(ABC):
 		if not evaluation:
 			evaluation = Evaluation()
 
-		# Get FAR and FRR
-		dist_matrix, imp_matrix = self.dist_and_imp_matrix(gallery, probe, impostors)
-		g_classes = self.classes(gallery)
-		p_classes = self.classes(probe)
-		imp_classes = self.classes(impostors)
+		# Load dist_matrix and imp_matrix info
+		if use_precomputed and save and os.path.isfile(save):
+			self._print(f"Reading info from {save}.")
+			with open(save, 'rb') as f:
+				dist_matrix = pickle.load(f)
+				imp_matrix = pickle.load(f)
+				g_classes = pickle.load(f)
+				p_classes = pickle.load(f)
+				imp_classes = pickle.load(f)
+
+		# Compute dist_matrix and imp_matrix info
+		else:
+			dist_matrix, imp_matrix = self.dist_and_imp_matrix(gallery, probe, impostors)
+			g_classes = self.classes(gallery)
+			p_classes = self.classes(probe)
+			imp_classes = self.classes(impostors)
 
 		# Save dist_matrix and imp_matrix info
 		if save:
+			self._print(f"Saving info to {save}.")
+			dir = os.path.dirname(save)
+			if not os.path.isdir(dir):
+				os.makedirs(dir)
 			with open(save, 'wb') as f:
 				pickle.dump(dist_matrix, f)
 				pickle.dump(imp_matrix, f)
@@ -58,6 +75,7 @@ class CVModel(ABC):
 				pickle.dump(p_classes, f)
 				pickle.dump(imp_classes, f)
 
+		# Get FAR and FRR
 		far, frr, threshold = evaluation.compute_error_rates(
 			dist_matrix,
 			g_classes,

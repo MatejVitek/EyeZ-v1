@@ -54,7 +54,7 @@ def main():
 	if GROUP_BY:
 		test = test.group_by(GROUP_BY, BINS)
 
-	models = (scleranet(), sift())
+	models = (sift(), sift('surf'), sift('orb'))
 
 	painter = Painter(
 		lim=(0, 1.01),
@@ -78,7 +78,7 @@ def main():
 				train,
 				test,
 				K,
-				plot=painter,
+				#plot=painter,
 				closest_only=True,
 				intergroup_evaluation=True
 			)

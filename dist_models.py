@@ -22,6 +22,7 @@ class DistModel(ABC):
 		return self._dist(*img)
 
 	def _cache_value(self, f):
+		print(f)
 		img = cv2.imread(f, cv2.IMREAD_GRAYSCALE)
 		return cv2.resize(img, (256, 256))
 
@@ -31,17 +32,26 @@ class DistModel(ABC):
 
 
 class SIFT(DistModel):
-	def __init__(self, *args, cache_size=1000, **kw):
+	def __init__(self, alg='sift', *args, cache_size=1000, **kw):
 		super().__init__(cache_size)
-		self.sift = cv2.xfeatures2d.SIFT_create(*args, **kw)
-		self.bf = cv2.BFMatcher()
+
+		if alg.lower() == 'sift':
+			self.alg = cv2.xfeatures2d.SIFT_create(*args, **kw)
+		elif alg.lower() == 'surf':
+			self.alg = cv2.xfeatures2d.SURF_create(*args, **kw)
+		elif alg.lower() == 'orb':
+			self.alg = cv2.ORB_create(*args, **kw)
+		else:
+			raise ValueError(f"Unsupported descriptor algorithm {sift}.")
+
+		self.matcher = cv2.BFMatcher()
 
 	def _cache_value(self, f):
 		img = super()._cache_value(f)
-		return self.sift.detectAndCompute(img, None)[1]
+		return self.alg.detectAndCompute(img, None)[1]
 
 	def _dist(self, des1, des2):
-		matches = self.bf.knnMatch(des1, des2, k=2)
+		matches = self.matcher.knnMatch(des1, des2, k=2)
 		good = [m1 for m1, m2 in matches if m1.distance < 0.75 * m2.distance]
 		#return sum(m.distance for m in good) / len(good) if good else 1.
 		return 1 - (len(good) / len(matches))
