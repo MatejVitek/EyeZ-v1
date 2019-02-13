@@ -1,3 +1,4 @@
+import os
 import re
 
 import dataset
@@ -11,7 +12,7 @@ U = (dataset.U, 'up', 'Up', 'UP', 'u', 'U')
 
 
 class NamingParser(object):
-	def __init__(self, naming=r'ie_d_n', naming_re=None, eyes=r'LR', directions=r'lrsu', strict=False):
+	def __init__(self, naming=r'ie_d_n', naming_re=None, eyes=r'LR', directions=r'lrsu', **kw):
 		self.eyes = eyes
 		if isinstance(self.eyes, dict):
 			self.eyes = ''.join(self.eyes[d] for d in L + R if d in self.eyes)
@@ -23,6 +24,9 @@ class NamingParser(object):
 			self.directions = ''.join(self.directions[d] for d in L + R + C + U if d in self.directions)
 		else:
 			self.directions = ''.join(self.directions)
+
+		# Default taken from Iterator.white_list_formats in https://github.com/keras-team/keras-preprocessing/blob/master/keras_preprocessing/image/iterator.py
+		self.extensions = kw.get('valid_extensions', ('png', 'jpg', 'jpeg', 'bmp', 'ppm', 'tif', 'tiff'))
 
 		if naming_re:
 			self.re = naming_re
@@ -40,7 +44,7 @@ class NamingParser(object):
 			if pattern not in self.re:
 				raise ValueError(f"Missing pattern {pattern} in naming regex.")
 
-		self.match = re.fullmatch if strict else re.match
+		self.match = re.fullmatch if kw.get('strict', False) else re.match
 
 	def parse(self, name):
 		match = self.match(self.re, name)
@@ -51,5 +55,6 @@ class NamingParser(object):
 			'n': int(match.group('n'))
 		}
 
-	def valid(self, name):
-		return self.match(self.re, name)
+	def valid(self, name_with_ext):
+		name, ext = os.path.splitext(name_with_ext)
+		return self.match(self.re, name) and any(ext.lower() in (x.lower(), '.' + x.lower()) for x in self.extensions)

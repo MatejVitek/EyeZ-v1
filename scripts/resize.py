@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from joblib import Parallel, delayed
 import os
 from PIL import Image

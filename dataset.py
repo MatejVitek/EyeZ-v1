@@ -42,7 +42,7 @@ class Dataset(object):
 		"""
 		Dataset handler
 
-		:param dir: Root directory (should adhere to keras structure)
+		:param dir: Root directory
 		:param data: Collection of Samples to build the dataset from
 		:param naming: Naming convention handler (dir mode only). If None, will use default parser.
 		:type  naming: NamingParser or None
@@ -68,14 +68,14 @@ class Dataset(object):
 			print(f"Found {len(self.data)} images belonging to {self.n_classes} classes.")
 
 	def _read_samples(self, dir):
+		if not os.path.isdir(dir):
+			raise ValueError(f"{dir} is not a directory.")
 		naming = self.settings.get('naming', NamingParser())
 		return [
-			Sample(os.path.join(dir, cls_dir, sample), naming)
-			for cls_dir in os.listdir(dir)
-			if os.path.isdir(os.path.join(dir, cls_dir))
-			for sample in os.listdir(os.path.join(dir, cls_dir))
-			if os.path.isfile(os.path.join(dir, cls_dir, sample))
-			and naming.valid(os.path.splitext(sample)[0])
+			Sample(os.path.join(root, file), naming)
+			for root, _, files in os.walk(dir)
+			for file in files
+			if naming.valid(file)
 		]
 
 	def _assign_class_labels(self):

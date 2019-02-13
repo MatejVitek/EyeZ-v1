@@ -1,14 +1,16 @@
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 import cv2
+import scipy
 
 
 class DistModel(ABC):
-	def __init__(self, cache_size=100):
+	def __init__(self, cache_size=100, image_size=(256, 256)):
 		self.size = cache_size
 		if self.size < 2:
 			raise ValueError("cache_size needs to be at least 2")
 		self.cache = OrderedDict()
+		self.image_size = image_size
 
 	def distance(self, sample1, sample2):
 		img = [None, None]
@@ -22,27 +24,26 @@ class DistModel(ABC):
 		return self._dist(*img)
 
 	def _cache_value(self, f):
-		print(f)
 		img = cv2.imread(f, cv2.IMREAD_GRAYSCALE)
-		return cv2.resize(img, (256, 256))
+		return cv2.resize(img, self.image_size)
 
 	@abstractmethod
 	def _dist(self, cached1, cached2):
 		pass
 
 
-class SIFT(DistModel):
-	def __init__(self, alg='sift', *args, cache_size=1000, **kw):
+class DescriptorModel(DistModel):
+	def __init__(self, descriptor='sift', *args, cache_size=1000, **kw):
 		super().__init__(cache_size)
 
-		if alg.lower() == 'sift':
+		if descriptor.lower() == 'sift':
 			self.alg = cv2.xfeatures2d.SIFT_create(*args, **kw)
-		elif alg.lower() == 'surf':
+		elif descriptor.lower() == 'surf':
 			self.alg = cv2.xfeatures2d.SURF_create(*args, **kw)
-		elif alg.lower() == 'orb':
+		elif descriptor.lower() == 'orb':
 			self.alg = cv2.ORB_create(*args, **kw)
 		else:
-			raise ValueError(f"Unsupported descriptor algorithm {sift}.")
+			raise ValueError(f"Unsupported descriptor algorithm {descriptor}.")
 
 		self.matcher = cv2.BFMatcher()
 
@@ -55,3 +56,7 @@ class SIFT(DistModel):
 		good = [m1 for m1, m2 in matches if m1.distance < 0.75 * m2.distance]
 		#return sum(m.distance for m in good) / len(good) if good else 1.
 		return 1 - (len(good) / len(matches))
+
+class CorrelationModel(DistModel):
+	def _dist(self, cached1, cached2):
+		print(scipy.signal.correlate2d(cached1, cached2))

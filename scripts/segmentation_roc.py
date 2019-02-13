@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import numpy as np
 from sklearn.metrics import precision_recall_curve, auc
 import matplotlib.pyplot as plt

@@ -64,7 +64,7 @@ class CV(object):
 		if isinstance(train, Dataset):
 			train = CVSplit(train, k)
 
-		# If test is passed as a Dataset, split into base and verification attempts
+		# If test is passed as a Dataset, split into base set and verification attempts
 		if isinstance(test, Dataset):
 			test = BaseSplit(test)
 
