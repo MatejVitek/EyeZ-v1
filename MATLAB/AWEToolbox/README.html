@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8" />
+		<title>Manual of Annotated Web Ears Toolbox</title>
+		<style type="text/css">
+			h1 {
+				font-family: Georgia, Times, 'Times New Roman', serif;
+				font-size: 30px;
+				font-style: normal;
+				font-variant: normal;
+				font-weight: 500;
+			}
+			h2 {
+				font-family: Georgia, Times, 'Times New Roman', serif;
+				font-size: 24px;
+				font-style: normal;
+				font-variant: normal;
+				font-weight: 500;
+			}
+			body {
+				font-family: Helvetica, sans-serif;
+				font-size: 14px;
+				font-style: normal;
+				font-variant: normal;
+				font-weight: 400;
+				padding: 20px 50px;
+			}
+			ul.QandA {
+			  list-style-type: none;
+			  margin: 15px 0 15px 0;
+			  padding: 0;
+			  overflow: hidden;
+			}
+			ul.QandA .Q {
+			  font-family: "HelveticaBold", sans-serif;
+			  font-size: 15px;
+			  font-weight: bold;
+			}
+			ul.QandA .A {
+			  font-family: "Helvetica", sans-serif;
+			  margin-bottom: 20px;
+			}
+		</style>
+	</head>
+	<body>
+		<h1>Annotated Web Ears Toolbox</h1>
+		AWE Toolbox is intended for automatic evaluation of feature extractor methods on image datasets. AWE Dataset is already included, as well as some extraction methods.
+
+		You can use (and modify, but leave headers in the code) the toolbox and the dataset for non-commercial use. In your paper please cite:
+		Ž. Emeršič, V. Struc, and P. Peer: »Ear Recognition: More than a Survey«, accepted to Neurocomputing, 2016
+		<a href="http://awe.fri.uni-lj.si/downloads/awe.bibtex">Download bibtex here</a>.
+		
+		<ul class="QandA">
+			<li class="Q">What is this toolbox intended for?</li>
+			<li class="A">Primarily for automatic evaluation of feature extractor methods on image datasets. However, it can be used for evaluation of any part of biometric recognition pipeline.</li>
+			<li class="Q">What do I need to run the toolbox?</li>
+			<li class="A">Only Matlab (2015a or newer). However, some feature extraction methods that are included with the toolbox require Computer Vision System Toolbox to run. If you are writing and using only your methods you can ignore this requirement.</li>
+			<li class="Q">How do I start using it?</li>
+			<li class="A"><a href="http://awe.fri.uni-lj.si/help/tutorial">Follow the steps in here</a>. Summarized: run START_HERE.m and make sure that your current directory in Matlab is set to the root of the toolbox (where START_HERE.m is).</li>
+			<li class="Q">How do I add new method/dataset/preprocessor etc.?</li>
+			<li class="A">Add new function file with the predefined name in the appropriate folder (extractors, databases, preprocessors, etc.). You can find SCAFFOLD files and folders in there which will guide you on how to add your own code.</li>
+			<li class="Q">What dimensions should features vectors be? How can I use different parameters for feature extraction?</li>
+			<li class="A">Take a look at the SCAFFOLD for feature extraction.</li>
+			<li class="Q">I am free to use AWE Toolbox and modify it?</li>
+			<li class="A">Yes. However, currently we are limiting the use for educational purposes only.</li>
+			<li class="Q">Can I use the generated figures in my paper?</li>
+			<li class="A">Yes.</li>
+			<li class="Q">What do I do, if I encounter "Invalid MEX-file 'toolbox\libraries\vlfeat-0.9.20\toolbox\mex\mexw64\vl_sift.mexw64': The specified
+		module could not be found."</li>
+			<li class="A">You need to compile C to mex files. mex -setup needs to be done prior using this toolbox</li>
+			<li class="Q">How can I do parameter tuning?</li>
+			<li class="A">In the definition of an extractor add an arbitrary struct(), e.g. struct('eta', [10, 100, 1000], 'aleph', [0.1, 0.2, 0.3]). The toolbox will run all possible combinations for you. To use a combination in your extractor, use awet.current_parameter_set, however do not forget to set "global awet" before using awet.current_parameter_set.</li>
+		</ul>
+	</body>
+</html>
