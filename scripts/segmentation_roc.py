@@ -1,11 +1,88 @@
 #!/usr/bin/env python3
-import numpy as np
-from sklearn.metrics import precision_recall_curve, auc
+import itertools
+from joblib import Parallel, delayed
+import matplotlib.cm
+from matplotlib.colors import hsv_to_rgb
 import matplotlib.pyplot as plt
-import matplotlib.ticker as tick
+from matplotlib.ticker import FuncFormatter
+import numpy as np
 import os
 import pickle
-from tqdm import tqdm
+from random import shuffle
+from scipy.interpolate import interp1d
+from sklearn.metrics import precision_recall_curve, auc
+import sys
+from tqdm import tqdm, trange
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+from utils import get_rot_dir
+
+
+# Bootstrapping parameters
+K = 10
+ratio = 0.8
+
+# Which config to use
+cfg = 'sclera'
+
+#colors = iter([hsv_to_rgb((h, 1, 1)) for h in np.linspace(0, 1, len(models), endpoint=False)])
+colors = iter(matplotlib.cm.get_cmap('plasma')(np.linspace(0, 1, len(models), endpoint=False)))
+seg_results = os.path.join(get_rot_dir(), 'Segmentation', 'Results')
+if cfg == 'vessels':
+	models = ('Miura_MC', 'Miura_RLT', 'Miura_RLTGS', 'Miura_MC_norm', 'Miura_RLT_norm', 'Miura_RLTGS_norm', 'agt', 'segnet')
+	pred_dir = os.path.join(seg_results, 'Vessels')
+	fig_file = os.path.join(pred_dir, 'Vessels_ROC.eps')
+	f1_file = os.path.join(pred_dir, 'Vessels_Scores.txt')
+	pr_file = os.path.join(pred_dir, '{}_precision_recall')
+	#colors = iter(['red', 'blue', 'green', 'black'])
+elif cfg == 'sclera':
+	models = ('refinenet50', 'refinenet101', 'unet', 'segnet')
+	pred_dir = os.path.join(seg_results, 'Sclera')
+	fig_file = os.path.join(pred_dir, 'Sclera_ROC.eps')
+	f1_file = os.path.join(pred_dir, 'Sclera_Scores.txt')
+	pr_file = os.path.join(pred_dir, '{}_precision_recall')
+	colors = iter(['red', 'blue', 'green', 'black'])
+
+# Should precision/recall be loaded from above file(s) (True) or should it be computed anew (False)
+load_pr = True
+
+plt.rcParams['font.family'] = 'Times New Roman'
+plt.rcParams['font.size'] = 30
+legend_size = 20
+plt.figure('ROC')
+
+
+class FileInfo(object):
+	def __init__(self, model, file, precision, recall, threshold):
+		self.model = model
+		self.file = file
+		self.precision = precision
+		self.recall = recall
+		self.threshold = np.append(threshold, [1.])
+
+
+def _process_file(dir, model, f):
+	if '_gt' in f:
+		return None
+	f = os.path.join(dir, model, f)
+	if not os.path.isfile(f):
+		return None
+	gt_f = os.path.splitext(f)[0] + '_gt.png'
+	if not os.path.isfile(gt_f):
+		return None
+	
+	p = plt.imread(f)
+	if p.ndim > 2:
+		p = rgb2gray(p)
+	m = plt.imread(gt_f)
+	if m.ndim > 2:
+		m = rgb2gray(m)
+	# Binarise mask
+	m = m.round().astype(int)
+	if p.shape != m.shape:
+		raise ValueError(f"Different dimensions ({p.shape} and {m.shape}) for base and GT mask in image {f}.")
+	
+	return FileInfo(model, f, *precision_recall_curve(m.flatten(), p.flatten()))
 
 
 def format_bin_label(x, _):
@@ -13,87 +90,90 @@ def format_bin_label(x, _):
 
 
 def f1_score(precision, recall):
+	if precision == recall == 0:
+		return 0
 	return 2 * precision * recall / (precision + recall)
+	
+
+def rgb2gray(rgba):
+	return np.dot(rgba[...,:3], [0.2989, 0.587, 0.114])
 
 
 if __name__ == '__main__':
-	pred_dir = os.path.join('/hdd', 'EyeZ', 'Rot', 'Segmentation', 'Results')
-	fig_file = os.path.join('/hdd', 'EyeZ', 'Rot', 'Segmentation', 'Results', 'Seg_ROC.eps')
-	zoom_file = os.path.join('/hdd', 'EyeZ', 'Rot', 'Segmentation', 'Results', 'Seg_ROC_zoomed.eps')
-	f1_file = os.path.join('/hdd', 'EyeZ', 'Rot', 'Segmentation', 'Results', 'Scores.txt')
-	pr_file = os.path.join('/hdd', 'EyeZ', 'Rot', 'Segmentation', 'Results', '{}_precision_recall')
-	load_pr = True
-
-	plt.rcParams['font.family'] = 'Times New Roman'
-	plt.rcParams['font.size'] = 30
-	legend_size = 20
-	color = iter(['orange', 'red', 'blue', 'green'])
-	plt.figure('ROC')
-	plt.figure('Zoomed ROC')
-
-	with open(f1_file, 'w') as score:
-		for model in ('RefineNet50', 'RefineNet101', 'SegNet', 'UNet'):
-			print(model)
-		
-			if load_pr and os.path.isfile(pr_file.format(model)):
-				with open(pr_file.format(model), 'rb') as f:
-					precision, recall = pickle.load(f), pickle.load(f)
-		
-			else:
-				dir = os.path.join(pred_dir, model.lower())
-				gt = []
-				pred = []
-				for f in tqdm(os.listdir(dir)):
-					if '_mask' in f:
-						continue
-					f = os.path.join(dir, f)
-			
-					p = plt.imread(f)
-					m = 255 * plt.imread(os.path.splitext(f)[0] + '_mask.png')
-					try:
-						pred.extend(p.reshape(360*480))
-					except ValueError:
-						pred.extend(p[...,0].reshape(360*480))
-					try:
-						gt.extend(m.reshape(360*480))
-					except ValueError:
-						gt.extend(m[...,0].reshape(360*480))
-		
-				print("Generating curve")
-				precision, recall, _ = precision_recall_curve(gt, pred)
-		
-				# Hack for outliers
-				p_bad = np.where(np.sign(np.diff(precision)) == -1)[0]
-				for bad in p_bad:
-					precision[bad+1] = precision[bad]
-				r_bad = np.where(np.sign(np.diff(recall)) == 1)[0]
-				for bad in r_bad:
-					recall[bad+1] = recall[bad]
-				
-				# Save precision and recall
-				with open(pr_file.format(model), 'wb') as f:
-					pickle.dump(precision, f)
-					pickle.dump(recall, f)
-			
-			max_f1_score = (None, None, float('-inf'))
-			for (p, r) in zip(precision, recall):
-				f1 = f1_score(p, r)
-				if f1 > max_f1_score[2]:
-					max_f1_score = (p, r, f1)
-			score.write(f"{model}: {max_f1_score}, AUC {auc(recall, precision)}\n")
-		
-			c = next(color)
-			plt.figure('ROC')
-			plt.plot(recall, precision, label=model, linewidth=2, color=c)
-			plt.plot(max_f1_score[1], max_f1_score[0], 'o', color=c)
-			plt.figure('Zoomed ROC')
-			plt.plot(recall, precision, label=model, linewidth=2, color=c)
-			plt.plot(max_f1_score[1], max_f1_score[0], 'o', markersize=15, color=c)
+	info = {model: [] for model in models}
 	
-	plt.figure('ROC')
+	if load_pr:
+		print("Loading existing precision/recall info")
+		existing = {model for model in models if os.path.isfile(pr_file.format(model))}
+		for model in existing:
+			with open(pr_file.format(model), 'rb') as f:
+				info[model] = pickle.load(f)
+		models = list(set(models) - existing)
+	
+	print("Computing precision/recall")
+	output = [x for x in Parallel(n_jobs=-1, backend='multiprocessing')(
+		delayed(_process_file)(pred_dir, model, file)
+		for model, file in itertools.chain.from_iterable(itertools.product([model], os.listdir(os.path.join(pred_dir, model))) for model in models)
+	) if x is not None]
+	for file in output:
+		info[file.model].append(file)
+	
+	print(info.keys())
+	
+	# Save precision and recall
+	for model in models:
+		with open(pr_file.format(model), 'wb') as f:
+			pickle.dump(info[model], f)
+
+	print("Computing means and stds")
+	with open(f1_file, 'w') as score:
+		for model in tqdm(info):
+			pop_size = round(ratio * len(info[model]))
+			interp_points = 1000
+			max_f1 = np.empty((K, pop_size, 3))
+			auc_ = np.empty((K, pop_size))
+			precision = np.empty((K, pop_size, interp_points))
+			recall = np.empty((K, pop_size, interp_points))
+			
+			for k in trange(K):
+				# Get a random sample population of size determined by ratio
+				shuffle(info[model])
+				files = info[model][:round(ratio * len(info[model]))]
+				
+				for i, file in tqdm(enumerate(files)):
+					# Max F1 score and its corresponding precision/recall values
+					max_f1[k, i, :] = (None, None, float('-inf'))
+					for (p, r) in zip(file.precision, file.recall):
+						f1 = f1_score(p, r)
+						if f1 > max_f1[k, i, 2]:
+							max_f1[k, i, :] = (p, r, f1)
+					# AUC
+					auc_[k, i] = auc(file.recall, file.precision)
+					
+					# Precision/recall interpolation
+					precision[k, i, :] = interp1d(file.threshold, file.precision, fill_value='extrapolate')(np.linspace(0, 1, interp_points))
+					recall[k, i, :] = interp1d(file.threshold, file.recall, fill_value='extrapolate')(np.linspace(0, 1, interp_points))
+					
+			# Compute mean and std of scores
+			score.write(f"{model}: {max_f1.mean((0, 1))} \u00B1 {max_f1.std((0, 1))}, AUC {auc_.mean()} \u00B1 {auc_.std()}\n")
+			
+			# Plot mean and upper/lower std ROCs
+			pr = {}
+			for name, y in (('precision', precision), ('recall', recall)):
+				mean, std = y.mean((0, 1)), y.std((0, 1))
+				pr[name, 'mean'] = mean
+				pr[name, 'std1'] = mean + std
+				pr[name, 'std2'] = mean - std
+			
+			c = next(colors)
+			plt.plot(pr['recall', 'mean'], pr['precision', 'mean'], label=model, linewidth=2, color=c)
+			for std in ('std1', 'std2'):
+				plt.plot(pr['recall', std], pr['precision', std], ':', linewidth=1, color=c)
+			#plt.plot(max_f1_score[1], max_f1_score[0], 'o', color=c)
+	
 	plt.grid()
-	plt.gca().xaxis.set_major_formatter(tick.FuncFormatter(format_bin_label))
-	plt.gca().yaxis.set_major_formatter(tick.FuncFormatter(format_bin_label))
+	plt.gca().xaxis.set_major_formatter(FuncFormatter(format_bin_label))
+	plt.gca().yaxis.set_major_formatter(FuncFormatter(format_bin_label))
 	plt.margins(0)
 	plt.xlabel('Recall')
 	plt.ylabel('Precision')
@@ -101,23 +181,8 @@ if __name__ == '__main__':
 	plt.ylim(0, 1.01)
 	plt.xticks(np.linspace(0.2, 1, 5))
 	plt.yticks(np.linspace(0, 1, 6))
-	plt.legend(loc='lower left', fontsize=legend_size)
+	plt.legend(loc='upper right', fontsize=legend_size)
 	plt.savefig(fig_file, bbox_inches='tight')
-	plt.tight_layout(pad=0)
-	
-	plt.figure('Zoomed ROC')
-	plt.grid()
-	plt.gca().xaxis.set_major_formatter(tick.FuncFormatter(format_bin_label))
-	plt.gca().yaxis.set_major_formatter(tick.FuncFormatter(format_bin_label))
-	plt.margins(0)
-	plt.xlabel('Recall')
-	plt.ylabel('Precision')
-	plt.xlim(0.9, 1.01)
-	plt.ylim(0.9, 1.01)
-	plt.xticks(np.linspace(0.92, 1, 5))
-	plt.yticks(np.linspace(0.9, 1, 6))
-	plt.legend(loc='upper right', fontsize=legend_size, borderpad=0.2, borderaxespad=0.2, labelspacing=0.2)
-	plt.savefig(zoom_file, bbox_inches='tight')
 	plt.tight_layout(pad=0)
 	
 	plt.show()
