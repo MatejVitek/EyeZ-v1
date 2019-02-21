@@ -34,7 +34,7 @@ def get_rot_dir():
 			return os.path.join(disk, 'EyeZ', 'Rot')
 
 
-def get_id_info(path=os.path.join(get_rot_dir(), 'SBVP_Gender_Age_Color.txt')):
+def get_id_info(path=os.path.join(get_rot_dir(), 'SBVPI', 'SBVP_Gender_Age_Color.txt')):
 	try:
 		with open(path, 'r') as f:
 			return {

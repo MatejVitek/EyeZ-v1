@@ -13,15 +13,15 @@ from plot import Painter
 import utils
 
 
-K = 10
+K = 5
 
 
 # Should dataset be grouped by an attribute (such as age)? If not, set GROUP_BY to None.
 GROUP_BY = None
 #GROUP_BY = 'age'
-# Bins to group into. For more info, see dataset.Dataset.group_by.
+# Bins to group into. Ignored if GROUP_BY is None. For more info, see dataset.Dataset.group_by.
 BINS = (25, 40)
-# Are we using intergroup evaluation? See cross_validate.CV.cross_validate_grouped.
+# Are we using intergroup evaluation? Ignored if GROUP_BY is None. See cross_validate.CV.cross_validate_grouped.
 INTERGROUP = True
 
 
@@ -64,7 +64,7 @@ def main():
 	if GROUP_BY:
 		test = test.group_by(GROUP_BY, BINS)
 
-	models = (correlation(),)
+	models = (descriptor('sift', True),)
 
 	painter = None
 	if PLOT:
@@ -110,8 +110,8 @@ def base_nn_config(model, train=False, feature_size=None, first_unfreeze=None):
 	if train:
 		return TrainablePredictorModel(
 			model,
-			primary_epochs=30,
-			secondary_epochs=10,
+			primary_epochs=50,
+			secondary_epochs=30,
 			feature_size=feature_size,
 			first_unfreeze=first_unfreeze,
 			primary_opt=RMSprop(lr=1e-4),
@@ -141,6 +141,7 @@ def descriptor(*args, **kw):
 	return DirectDistanceModel(DescriptorModel(*args, **kw))
 
 
+# Too slow and doesn't work
 def correlation():
 	return DirectDistanceModel(CorrelationModel())
 
