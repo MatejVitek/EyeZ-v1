@@ -123,10 +123,14 @@ class Metric(object):
 def eer(far, frr, x):
 	# See https://math.stackexchange.com/questions/2987246/finding-the-y-coordinate-of-the-intersection-of-two-functions-when-all-x-coordin
 	# and https://en.wikipedia.org/wiki/Line%E2%80%93line_intersection#Given_two_points_on_each_line for explanation of below formulas
-	i = np.argwhere(np.diff(np.sign(far - frr))).flatten()[0]
+	try:
+		i = np.argwhere(np.diff(np.sign(far - frr))).flatten()[0]
+	except IndexError:
+		# No intersection
+		return 1.
 
-	x = (x[i], x[i + 1])
-	y = (far[i], far[i + 1], frr[i], frr[i + 1])
+	x = (x[i], x[i+1])
+	y = (far[i], far[i+1], frr[i], frr[i+1])
 	return (
 		((x[0] * y[1] - x[1] * y[0]) * (y[2] - y[3]) - (x[0] * y[3] - x[1] * y[2]) * (y[0] - y[1])) /
 		((x[0] - x[1]) * (-y[0] + y[1] + y[2] - y[3]))
@@ -134,6 +138,11 @@ def eer(far, frr, x):
 
 
 def ver_at_far(far, tar, x, far_point=0.01):
-	i = np.argwhere(np.diff(np.sign(far - far_point))).flatten()[0]
-	alpha = (far_point - x[i]) / (x[i + 1] - x[1])
-	return alpha * tar[i] + (1 - alpha) * tar[i + 1]
+	try:
+		i = np.argwhere(np.diff(np.sign(far - far_point))).flatten()[0]
+	except IndexError:
+		# No intersection
+		return 0.
+	
+	alpha = (far_point - x[i]) / (x[i+1] - x[1])
+	return alpha * tar[i] + (1 - alpha) * tar[i+1]
