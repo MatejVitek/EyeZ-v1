@@ -1,65 +1,75 @@
 %% Config
-global src_dir segnet_dir save_dir alg
-
 % Source directory for images
-src_dir = '/hdd/EyeZ/Rot/Resized SBVP/SBVP_vessels_480x360/';
+src_dir = '/hdd/EyeZ/Rot/SBVPI/SBVP_vessels/';
 
 % Source directory for SegNet sclera mask predictions
-segnet_dir = '/hdd/EyeZ/Rot/Segmentation/Results/segnet/';
+sclera_dir = '/hdd/EyeZ/Rot/Segmentation/Results/segnet/';
 
 % Matching algorithm
 alg_dir = 'Miura';
-%alg_name = 'MC';
-%alg_name = 'RLT';
-alg_name = 'RLTGS';
 addpath(strcat('./', alg_dir));
-alg = @(image, sclera)(my_pred(image, sclera, alg_name));
-%alg = @(image, sclera)(my_pred(image, sclera, alg_name, 'norm'));
 
 % Directory to save results to
-save_dir = strcat('/hdd/EyeZ/Rot/Segmentation/Results/', alg_dir, '_', alg_name, '/');
-%save_dir = strcat('/hdd/EyeZ/Rot/Segmentation/Results/', alg_dir, '_', alg_name, '_norm/');
-if ~exist(save_dir, 'dir')
-	mkdir(save_dir);
+save_dir = strcat('/hdd/EyeZ/Rot/Segmentation/Results/', alg_dir);
+
+% Evaluate algorithms
+for alg_name = {'MC', 'RLT', 'RLTGS'}
+	evaluate_alg_pair(alg_name{1}, src_dir, sclera_dir, save_dir);
 end
 
-%% Evaluate matching algorithm on the dataset
-set = imageSet(src_dir, 'recursive');
-%results = zeros(1, sum(vertcat(set.Count)));
-k = 0;
-for id_images = set
-	% Iterate over all images of current ID
-	for image = id_images.ImageLocation
-		% If it's a mask image, skip it
-		[path, basename, ~] = fileparts(image{1});
-		if regexp(basename, '\d+[LR]_[lrsu]_\d+_')
-			continue
-		end
-		
-		% Evaluate a single image
-		disp(basename);
-		score = evaluate(path, basename);
-		
-		% If a mask was not found, skip
-		if score == -1
-			continue
-		end
-		
-		% Otherwise save the result
-		k = k + 1;
-		%results(k) = score;
-	end
-end
-disp(['Found ' num2str(k) ' images.']);
-%results = results(1:k);
-
-%% Load an image and its corresponding sclera prediction and vessels GT mask and evaluate the matching algorithm on it
-function score = evaluate(path, basename)
-	global segnet_dir save_dir alg
+%% Evaluate binarised and normalised algorithm version
+function evaluate_alg_pair(alg_name, src_dir, sclera_dir, save_dir)
+	save = strcat(save_dir, '_', alg_name, '/');
+	alg = @(image, sclera)(my_pred(image, sclera, alg_name));
+	evaluate_alg(alg, src_dir, sclera_dir, save);
 	
-	sclera_file = strcat(segnet_dir, basename, '.png');
+	save = strcat(save_dir, '_', alg_name, '_norm/');
+	alg = @(image, sclera)(my_pred(image, sclera, alg_name, 'norm'));
+	evaluate_alg(alg, src_dir, sclera_dir, save);
+end
+
+%% Evaluate a single algorithm
+function evaluate_alg(alg, src_dir, sclera_dir, save)	
+	if ~exist(save, 'dir')
+		mkdir(save);
+	end
+
+	set = imageSet(src_dir, 'recursive');
+	%results = zeros(1, sum(vertcat(set.Count)));
+	k = 0;
+	
+	parfor (id_images = 1:length(set), 24)
+		% Iterate over all images of current ID
+		for image = set(id_images).ImageLocation
+			% If it's a mask image, skip it
+			[path, basename, ~] = fileparts(image{1});
+			if regexp(basename, '\d+[LR]_[lrsu]_\d+_')
+				continue
+			end
+
+			% Evaluate a single image
+			score = evaluate(path, basename, alg, sclera_dir, save);
+
+			% If a mask was not found, skip
+			if score == -1
+				continue
+			end
+
+			% Otherwise save the result
+			k = k + 1;
+			%results(k) = score;
+		end
+	end
+	disp(['Found ' num2str(k) ' images.']);
+	%results = results(1:k);
+end
+
+%% Load an image and its corresponding sclera prediction and vessels GT mask and evaluate the algorithm on it
+function score = evaluate(path, basename, alg, sclera_dir, save)
+	sclera_file = strcat(sclera_dir, basename, '.png');
 	vessels_file = strcat(path, '/', basename, '_vessels.png');
 	
+	disp(basename);
 	if ~isfile(sclera_file)
 		disp('404: Sclera not found');
 		score = -1;
@@ -69,9 +79,10 @@ function score = evaluate(path, basename)
 	
 	% Load base image
 	image = im2double(imread(strcat(path, '/', basename, '.JPG')));
+	s = size(image);
 	
 	% Load masks
-	sclera = im2double(rgb2gray(imread(sclera_file)));
+	sclera = imresize(im2double(rgb2gray(imread(sclera_file))), s(1:2));
 	if vessels_exist
 		vessels = im2double(imread(vessels_file));
 	
@@ -85,12 +96,11 @@ function score = evaluate(path, basename)
 	
 	% Run the matching algorithm
 	prediction = alg(image, sclera);
-	imshow(prediction);
 	
 	% Save prediction and GT mask
-	imwrite(prediction, strcat(save_dir, basename, '.png'));
+	imwrite(prediction, strcat(save, basename, '.png'));
 	if vessels_exist
-		imwrite(vessels, strcat(save_dir, basename, '_gt.png'));
+		imwrite(vessels, strcat(save, basename, '_gt.png'));
 	end
 	
 	% TODO: Calculate and return error rate

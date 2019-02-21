@@ -1,6 +1,6 @@
 %% Howto use the miura_* scripts.
 
-img = im2double(imread('/hdd/EyeZ/Rot/Resized SBVP/SBVP_vessels_480x360/1/1L_l_1.JPG')); % Read the image
+img = im2double(imread('/hdd/EyeZ/Rot/SBVPI/Resized SBVP/SBVP_vessels_480x360/1/1L_l_1.JPG')); % Read the image
 % img = imresize(img,0.5);               % Downscale image
 
 % Get the valid region, this is a binary mask which indicates the region of 
