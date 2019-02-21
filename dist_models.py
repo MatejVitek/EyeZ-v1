@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 import cv2
-import scipy
+import matplotlib.pyplot as plt
+import numpy as np
+import scipy.signal
 
 
 class DistModel(ABC):
@@ -33,9 +35,10 @@ class DistModel(ABC):
 
 
 class DescriptorModel(DistModel):
-	def __init__(self, descriptor='sift', *args, cache_size=1000, **kw):
-		super().__init__(cache_size)
+	def __init__(self, descriptor='sift', dense=False, *args, cache_size=1000, **kw):
+		super().__init__(cache_size=cache_size)
 
+		#pylint: disable=no-member
 		if descriptor.lower() == 'sift':
 			self.alg = cv2.xfeatures2d.SIFT_create(*args, **kw)
 		elif descriptor.lower() == 'surf':
@@ -45,18 +48,39 @@ class DescriptorModel(DistModel):
 		else:
 			raise ValueError(f"Unsupported descriptor algorithm {descriptor}.")
 
+		self.dense = dense
 		self.matcher = cv2.BFMatcher()
 
 	def _cache_value(self, f):
 		img = super()._cache_value(f)
-		return self.alg.detectAndCompute(img, None)[1]
+		if not self.dense:
+			return self.alg.detectAndCompute(img, None)[1]
+		step = 10 if self.dense is True else self.dense
+		kp = [cv2.KeyPoint(x, y, step) for y in range(0, img.shape[0], step) for x in range(0, img.shape[1], step)]
+		return self.alg.compute(img, kp)[1]
 
 	def _dist(self, des1, des2):
+		if des1 is None or len(des1) == 0 or des2 is None or len(des2) == 0:
+			return 1.
 		matches = self.matcher.knnMatch(des1, des2, k=2)
-		good = [m1 for m1, m2 in matches if m1.distance < 0.75 * m2.distance]
+		good = [m[0] for m in matches if len(m) > 1 and m[0].distance < 0.75 * m[1].distance]
 		#return sum(m.distance for m in good) / len(good) if good else 1.
 		return 1 - (len(good) / len(matches))
 
+
+# Too slow and doesn't work properly
 class CorrelationModel(DistModel):
+	def __init__(self, *args, cache_size=500, image_size=(128, 128), **kw):
+		super().__init__(*args, cache_size=cache_size, image_size=image_size, **kw)
+
 	def _dist(self, cached1, cached2):
-		print(scipy.signal.correlate2d(cached1, cached2))
+		correlation = scipy.signal.correlate2d(cached1, cached2)
+		f, axes = plt.subplots(2, 2)
+		f.set_size_inches(15, 15)
+		axes[0,0].imshow(cached1, cmap='gray')
+		axes[0,1].imshow(cached2, cmap='gray')
+		axes[1,0].imshow(correlation, cmap='gray')
+		axes[1,1].axis('off')
+		plt.show()
+		print(correlation.max())
+		return correlation.max() / max(np.linalg.norm(cached1), np.linalg.norm(cached2))
