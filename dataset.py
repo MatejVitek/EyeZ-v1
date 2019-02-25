@@ -1,4 +1,3 @@
-import itertools
 import numpy as np
 import os
 import random
@@ -21,6 +20,7 @@ class Sample(object):
 		self.basename = os.path.basename(os.path.splitext(self.file)[0])
 		self.__dict__.update(naming.parse(self.basename))
 
+		#pylint: disable=no-member
 		if EXTRA_INFO:
 			self.gender = EXTRA_INFO[self.id].gender
 			self.age = EXTRA_INFO[self.id].age
@@ -230,20 +230,15 @@ class AttributeSplit(GPSplit):
 class BaseSplit(GPSplit):
 	def new_split(self):
 		self.dataset.shuffle()
-		g = []
-		p = []
-		base_ns = {}
+		gallery = []
+		probe = []
 
 		for s in self.dataset:
-			if s.label in base_ns:
-				if s.n == base_ns[s.label]:
-					g.append(s)
-				else:
-					p.append(s)
+			if any(s.label == g.label and s.direction == g.direction for g in gallery):
+				probe.append(s)
 			else:
-				base_ns[s.label] = s.n
-				g.append(s)
+				gallery.append(s)
 
-		self.gallery = self._dataset(g)
-		self.probe = self._dataset(p)
+		self.gallery = self._dataset(gallery)
+		self.probe = self._dataset(probe)
 		return self.gallery, self.probe

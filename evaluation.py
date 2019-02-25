@@ -11,6 +11,7 @@ class Evaluation(object):
 		self.auc = Metric("AUC")
 		self.eer = Metric("EER")
 		self.ver1far = Metric("VER@1FAR")
+		self.ver01far = Metric("VER@0.1FAR")
 
 	def __str__(self):
 		return "\n".join(str(metric) for metric in self.all_metrics())
@@ -28,6 +29,8 @@ class Evaluation(object):
 
 		same = self._same(dist_matrix, g_classes, p_classes, closest_only)
 		diff = self._diff(imp_matrix, g_classes, imp_classes, closest_only)
+		print(f"Client verification attempts: {len(same)}")
+		print(f"Impostor verification attempts: {len(diff)}")
 
 		self._far = np.array([np.count_nonzero(diff <= t) / len(diff) for t in self._threshold])
 		self._frr = np.array([np.count_nonzero(same > t) / len(same) for t in self._threshold])
@@ -48,6 +51,11 @@ class Evaluation(object):
 	def update_ver1far(self):
 		ver = ver_at_far(self._far, self._tar, self._threshold, 0.01)
 		self.ver1far.update(ver)
+		return ver
+
+	def update_ver01far(self):
+		ver = ver_at_far(self._far, self._tar, self._threshold, 0.001)
+		self.ver01far.update(ver)
 		return ver
 
 	@staticmethod
@@ -143,6 +151,6 @@ def ver_at_far(far, tar, x, far_point=0.01):
 	except IndexError:
 		# No intersection
 		return 0.
-	
+
 	alpha = (far_point - x[i]) / (x[i+1] - x[1])
 	return alpha * tar[i] + (1 - alpha) * tar[i+1]

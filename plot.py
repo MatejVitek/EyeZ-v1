@@ -1,7 +1,7 @@
 import itertools
 from matplotlib.colors import hsv_to_rgb
 import matplotlib.pyplot as plt
-import matplotlib.ticker as tick
+from matplotlib.ticker import FuncFormatter
 import numpy as np
 
 
@@ -20,9 +20,9 @@ class Figure(object):
 		:param int font_size: Size of label fonts
 		:param str xlabel: X label
 		:param str ylabel: Y label
-		:param x_tick_formatter: Tick formatter for x axis
-		:param y_tick_formatter: Tick formatter for y axis
-		:param tick_formatter: Same tick formatter for both axes
+		:param x_tick_formatter: Tick formatter function for x axis
+		:param y_tick_formatter: Tick formatter function for y axis
+		:param tick_formatter: Same tick formatter function for both axes
 		:param xlim: Axis limits for x axis
 		:param ylim: Axis limits for y axis
 		:param lim: Same axis limits for both axes
@@ -87,16 +87,18 @@ class Figure(object):
 			**kw
 		)
 
+		plt.xscale(cfg.get('xscale', 'linear'))
+		plt.yscale(cfg.get('yscale', 'linear'))
 		plt.xlabel(cfg.get('xlabel', ''))
 		plt.ylabel(cfg.get('ylabel', ''))
-		plt.gca().xaxis.set_major_formatter(
+		plt.gca().xaxis.set_major_formatter(FuncFormatter(
 			cfg.get('x_tick_formatter') or
-			cfg.get('tick_formatter', tick.FuncFormatter(def_tick_format))
-		)
-		plt.gca().yaxis.set_major_formatter(
+			cfg.get('tick_formatter', def_tick_format)
+		))
+		plt.gca().yaxis.set_major_formatter(FuncFormatter(
 			cfg.get('y_tick_formatter') or
-			cfg.get('tick_formatter', tick.FuncFormatter(def_tick_format))
-		)
+			cfg.get('tick_formatter', def_tick_format)
+		))
 		plt.xlim(cfg.get('xlim') or cfg.get('lim'))
 		plt.ylim(cfg.get('ylim') or cfg.get('lim'))
 		plt.xticks(cfg.get('xticks', cfg.get('ticks')))
@@ -108,7 +110,7 @@ class Figure(object):
 			**cfg.get('grid_kw', {})
 		)
 		if self.label:
-			plt.legend(loc=cfg.get('legend_loc', 'lower right'), fontsize=cfg.get('legend_size', 20))
+			plt.legend(loc=cfg.get('legend_loc', 'best'), fontsize=cfg.get('legend_size', 20))
 
 		plt.margins(cfg.get('margins', 0))
 		plt.tight_layout(pad=cfg.get('pad', 0))
@@ -241,28 +243,37 @@ class Painter(object):
 def cycle_colors(colors, k=None):
 	# Determine correct k if unspecified
 	if k is None:
-		try:
+		if isinstance(colors, str):
+			k = 32
+		else:
 			k = len(colors)
-		except TypeError:
-			k = 256
 
-	# HSV-uniform colormap
-	if colors.lower() in ('hsv', 'uniform', 'hsvuniform', 'hsv-uniform', 'hsv_uniform'):
-		colors = [hsv_to_rgb((h, 1, 1)) for h in np.linspace(0, 1, k, endpoint=False)]
-	
-	# Other colormaps
 	try:
-		colors = plt.cm.get_cmap(colors)(np.linspace(0, 1, k))
+		# HSV-uniform colormap
+		if colors.lower() in ('hsv', 'uniform', 'hsvuniform', 'hsv-uniform', 'hsv_uniform'):
+			colors = [hsv_to_rgb((h, 1, 1)) for h in np.linspace(0, 1, k, endpoint=False)]
+	
+		# Other colormaps
+		colors = plt.cm.get_cmap(colors)(np.linspace(0, 1, k, endpoint=False))
 		while True:
 			yield from colors
-
+	except (TypeError, AttributeError):
+		pass
+	
 	# Yield from array of colors (either passed as argument or defined above in HSV)
-	except (TypeError, ValueError):
-		while True:
-			idx = np.linspace(0, len(colors), k, endpoint=False, dtype=int)
-			for i in idx:
-				yield colors[i]
+	while True:
+		idx = np.linspace(0, len(colors), k, endpoint=False, dtype=int)
+		for i in idx:
+			yield colors[i]
 
 
 def def_tick_format(x, _):
 	return np.format_float_positional(x, precision=3, trim='-')
+
+
+def scientific_tick_format(x, _):
+	return np.format_float_scientific(x, precision=3, trim='-')
+
+
+def exp_format(x, _):
+	return rf'$\mathregular{{10^{{{int(round(np.log10(x)))}}}}}$'

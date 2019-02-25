@@ -7,8 +7,11 @@ import utils
 EXTRA_INFO = utils.get_id_info()
 
 
-# TODO: Put testing in a different module to get actual cross-validation here. Testing isn't a part of CV, CV is for training, model selection and parameter-tuning. Testing should only be done once, after all those steps are completed. The testing procedure here is bootstrapping (or maybe it's not IDK).
-class CV(object):
+# TODO: Put testing in a different module to get actual cross-validation here.
+# Testing isn't a part of CV, CV is for training, model selection and parameter-tuning.
+# Testing should only be done once, after all those steps are completed.
+# The testing procedure here is bootstrapping (or maybe it's not, IDK).
+class CV:
 	def __init__(self, model):
 		"""
 		Initializes a new cross-validation object

@@ -17,7 +17,7 @@ from image_generators import ImageGenerator, LabeledImageGenerator
 class CVModel(ABC):
 	def __init__(self, model):
 		self.model = model
-		self.verbose = None
+		self._verbose = None
 
 	def evaluate(self, gallery, probe, evaluation=None, impostors=None, plot=None, verbose=1, save=None, use_precomputed=False, **kw):
 		"""
@@ -41,7 +41,7 @@ class CVModel(ABC):
 		:rtype:  Evaluation
 		"""
 
-		self.verbose = verbose
+		self._verbose = verbose
 		if not evaluation:
 			evaluation = Evaluation()
 
@@ -63,10 +63,10 @@ class CVModel(ABC):
 			imp_classes = self.classes(impostors)
 
 		# Save dist_matrix and imp_matrix info
-		if save:
+		if save and not (use_precomputed and os.path.isfile(save)):
 			self._print(f"Saving info to {save}.")
 			dir = os.path.dirname(save)
-			if not os.path.isdir(dir):
+			if dir and not os.path.isdir(dir):
 				os.makedirs(dir)
 			with open(save, 'wb') as f:
 				pickle.dump(dist_matrix, f)
@@ -97,9 +97,13 @@ class CVModel(ABC):
 		self._print(f"AUC: {auc}")
 		if plot:
 			plot(far, 1 - frr, figure='ROC Curve')
+			plot(far, 1 - frr, figure='Semilog ROC Curve')
 
+		# VER@1FAR and VER@0.1FAR
 		ver1far = evaluation.update_ver1far()
 		self._print(f"VER@1FAR: {ver1far}")
+		ver01far = evaluation.update_ver01far()
+		self._print(f"VER@0.1FAR: {ver01far}")
 
 		return evaluation
 
@@ -120,20 +124,17 @@ class CVModel(ABC):
 	def classes(samples):
 		return [s.label for s in samples] if samples else None
 
-	def _print(self, s):
-		if self.verbose:
-			print(s)
+	def _print(self, *args, **kw):
+		if self._verbose:
+			print(*args, **kw)
 
 
 class DirectDistanceModel(CVModel):
-	def __init__(self, model):
-		"""
-		Wrapper for models that only calculate distances between images (such as SIFT)
+	"""
+	Wrapper for models that only calculate distances between images (such as SIFT)
 
-		:param DistModel model: wrapped model
-		"""
-
-		super().__init__(model)
+	:param DistModel model: wrapped model
+	"""
 
 	def _dist_and_imp_matrix(self, gallery, probe, impostors):
 		self._print("Gallery & probe")
@@ -153,7 +154,7 @@ class DirectDistanceModel(CVModel):
 			for g_s, p_s in itertools.product(range(0, len(gallery), sq), range(0, len(probe), sq))
 			for g, p in itertools.product(range(g_s, min(g_s + sq, len(gallery))), range(p_s, min(p_s + sq, len(probe))))
 		]
-		if self.verbose:
+		if self._verbose:
 			dm_idx = tqdm(dm_idx)
 
 		for g, p in dm_idx:
@@ -163,12 +164,13 @@ class DirectDistanceModel(CVModel):
 
 
 class PredictorModel(CVModel):
-	def __init__(self, model, batch_size=32, **kw):
+	def __init__(self, model, batch_size=32,  **kw):
 		"""
-		NN model wrapper
+		Feature extractor wrapper
 
-		:param model: NN model to evaluate (should not include the softmax layer)
+		:param model: Feature extractor to evaluate (NN should not include the softmax layer). Should have a predict_generator method.
 		:param int batch_size: Batch size
+		:param input_size: Input size. Will use model.input_shape to be determined automatically if not provided and model.input_shape exists.
 		:param distance: Distance metric for feature vector comparison (passed to scipy.spacial.distance.cdist).
 		                 Defaults to cosine distance.
 		:param distance_normalization: Function for distance normalization.
@@ -178,9 +180,20 @@ class PredictorModel(CVModel):
 
 		# Base model settings
 		super().__init__(model)
-		self.input_size = self.model.input_shape[1:3]
-		if any(size is None for size in self.input_size):
-			self.input_size = (256, 256)
+		self.input_size = kw.pop('input_size', None)
+		if not self.input_size:
+			try:
+				if len(self.model.input_shape) == 2:
+					# Custom model
+					self.input_size = self.model.input_shape
+				else:
+					# Keras NN
+					self.input_size = self.model.input_shape[1:3]
+				if any(size is None for size in self.input_size):
+					# Go to default value
+					raise TypeError()
+			except (AttributeError, TypeError):
+				self.input_size = (256, 256)
 
 		# Other settings
 		self.batch_size = batch_size
@@ -213,7 +226,7 @@ class PredictorModel(CVModel):
 			batch_size=self.batch_size,
 			shuffle=False
 		)
-		return self.model.predict_generator(gen, verbose=self.verbose)
+		return self.model.predict_generator(gen, verbose=self._verbose)
 
 
 class TrainablePredictorModel(PredictorModel):

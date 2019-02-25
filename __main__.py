@@ -7,13 +7,14 @@ from keras.optimizers import RMSprop
 from cross_validate import CV
 from dataset import Dataset
 from dist_models import *
+from hog import HOGModel
 from model_wrapper import *
 from naming import NamingParser
-from plot import Painter
+from plot import Painter, exp_format
 import utils
 
 
-K = 5
+K = 1
 
 
 # Should dataset be grouped by an attribute (such as age)? If not, set GROUP_BY to None.
@@ -26,7 +27,9 @@ INTERGROUP = True
 
 
 # Do we want a plot of our models' performances?
-PLOT = False
+PLOT = True
+# Do we want to save the evaluation results?
+SAVE = False
 
 
 # Training and testing datasets. If no training is to be done, set train to None.
@@ -64,7 +67,9 @@ def main():
 	if GROUP_BY:
 		test = test.group_by(GROUP_BY, BINS)
 
-	models = (descriptor('sift', True),)
+	models = (scleranet(), descriptor('sift'), descriptor('surf'), descriptor('orb'), descriptor('sift', True))
+	labels = ("CNN", "SIFT", "SURF", "ORB", "dSIFT")
+	results = os.path.join(utils.get_rot_dir(), 'Recognition', 'Results', 'Temp Scores.txt')
 
 	painter = None
 	if PLOT:
@@ -72,33 +77,59 @@ def main():
 			lim=(0, 1.01),
 			xticks=np.linspace(0.2, 1, 5),
 			yticks=np.linspace(0, 1, 6),
-			#colors=['r', 'b', 'g'],
+			colors=['r', 'b', 'g', 'purple', 'black'],
 			k=len(test) * K * len(models) if GROUP_BY else K * len(models),
-			labels=(
-				[f"{key} (k = {k})" for key in test.keys() for k in range(K)] if GROUP_BY and K > 1
-				else [f"{key}" for key in test.keys()] if GROUP_BY
-				else [f"k = {k}" for k in range(K)]
-			)
-			#labels=["CNN", "SIFT"]
+			#labels=(
+			#	[f"{key} (k = {k})" for key in test.keys() for k in range(K)] if GROUP_BY and K > 1
+			#	else [f"{key}" for key in test.keys()] if GROUP_BY
+			#	else [f"k = {k}" for k in range(K)]
+			#)
+			labels=labels
 		)
-		painter.add_figure('EER', xlabel='Threshold', ylabel='FAR/FRR')
-		painter.add_figure('ROC Curve', xlabel='FAR', ylabel='TAR', save='Sclera-ROC.eps')
 		painter.init()
-
-	for model in models:
-		evaluation = CV(model)(
-			train,
-			test,
-			K,
-			plot=painter,
-			closest_only=True,
-			intergroup_evaluation=INTERGROUP
+		painter.add_figure('EER', xlabel='Threshold', ylabel='FAR/FRR')
+		painter.add_figure('ROC Curve', save='Sclera-ROC.eps', xlabel='FAR', ylabel='TAR')
+		painter.add_figure(
+			'Semilog ROC Curve', save='Sclera-ROC-log.eps',
+			xlabel='FAR', ylabel='TAR', legend_loc='lower right',
+			xscale='log', xlim=(1e-3, 1.01), xticks=(1e-3, 1e-2, 1e-1, 1), x_tick_formatter=exp_format
 		)
-		if GROUP_BY:
-			for k, v in evaluation.items():
-				print(f'{k}:\n{str(v)}\n')
-		else:
-			print(evaluation)
+
+	results_file = None
+	if SAVE:
+		results_file = open(results, 'w')
+
+	try:
+		for model, label in zip(models, labels):
+			if SAVE:
+				results_file.write(f"{label}:\n\n")
+			evaluation = CV(model)(
+				train,
+				test,
+				K,
+				plot=painter,
+				closest_only=True,
+				intergroup_evaluation=INTERGROUP,
+				save=os.path.join(utils.get_rot_dir(), 'Recognition', 'Results', f'{label}.pkl'),
+				use_precomputed=True
+			)
+			if GROUP_BY:
+				for k, v in evaluation.items():
+					print(f"{k}:\n{str(v)}\n")
+					if SAVE:
+						results_file.write(f"{k}:\n{str(v)}\n")
+			else:
+				print(evaluation)
+				if SAVE:
+					results_file.write(str(evaluation))
+			if SAVE:
+				results_file.write("\n\n\n\n")
+
+	finally:
+		if PLOT:
+			painter.finalize()
+		if SAVE:
+			results_file.close()
 
 
 # Configs
@@ -139,6 +170,10 @@ def scleranet(layer='final_features'):
 
 def descriptor(*args, **kw):
 	return DirectDistanceModel(DescriptorModel(*args, **kw))
+
+
+def hog(*args, **kw):
+	return PredictorModel(HOGModel(*args, **kw), batch_size=BATCH_SIZE, distance=DIST)
 
 
 # Too slow and doesn't work
