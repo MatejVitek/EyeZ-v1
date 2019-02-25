@@ -3,6 +3,7 @@
 Lozej
 Rot
 *.pkl
+*.eps
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
