@@ -18,7 +18,7 @@ def main():
 
 def test_sift():
 	model = DirectDistanceModel(SIFT())
-	split = BaseSplit(Dataset(os.path.join(utils.get_rot_dir(), 'Recognition', 'all_directions_same_id', 'temp')))
+	split = BaseSplit(Dataset(os.path.join(utils.get_eyez_dir(), 'Recognition', 'Databases', 'Rot ScleraNet', 'temp')))
 	model.evaluate(split.gallery, split.probe)
 
 

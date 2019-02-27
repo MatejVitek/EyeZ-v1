@@ -17,8 +17,8 @@ NAMING = r'\d+[LR]_[lrsu]_\d+'
 
 
 def main():
-	source = os.path.join(utils.get_rot_dir(), 'Recognition', 'all_directions_same_id', 'stage2')
-	target = os.path.join(utils.get_rot_dir(), 'Resized_SegNet_Results')
+	source = os.path.join(utils.get_eyez_dir(), 'Recognition', 'Databases', 'Rot ScleraNet', 'stage2')
+	target = os.path.join(utils.get_eyez_dir(), 'Resized_SegNet_Results')
 	resize(source, target, NEW_SIZE, check_for_channels=False)
 
 

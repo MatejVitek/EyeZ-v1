@@ -10,7 +10,7 @@ import utils
 
 
 def main():
-	source = os.path.join(utils.get_rot_dir(), 'Recognition', 'all_directions_same_id', 'stage2')
+	source = os.path.join(utils.get_eyez_dir(), 'Recognition', 'Databases', 'Rot ScleraNet', 'stage2')
 	for (by, bins, bin_labels) in (('age', (25, 40), ('-25', '26-40', '41-')), ('gender', None, None)):
 		target = os.path.join(source, '..', f'stage2_{by}')
 		group_by(source, target, by, bins, bin_labels)

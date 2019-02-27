@@ -20,21 +20,22 @@ def multi_replace(string, replacements, ignore_case=False):
 	return pattern.sub(lambda match: replacements[match.group(0)], string)
 
 
-class Info(object):
+class Info:
 	def __init__(self, gender, age, color):
 		self.gender = gender
 		self.age = int(age)
 		self.color = color
 
 
-def get_rot_dir():
+def get_eyez_dir():
 	pc_name = socket.gethostname()
 	for disk in (WINDOWS[pc_name] if platform.system().lower() == 'windows' else UNIX[pc_name]):
-		if os.path.isdir(os.path.join(disk, 'EyeZ')):
-			return os.path.join(disk, 'EyeZ', 'Rot')
+		eyez = os.path.join(disk, 'EyeZ')
+		if os.path.isdir(eyez):
+			return eyez
 
 
-def get_id_info(path=os.path.join(get_rot_dir(), 'SBVPI', 'SBVP_Gender_Age_Color.txt')):
+def get_id_info(path=os.path.join(get_eyez_dir(), 'SBVPI', 'SBVP_Gender_Age_Color.txt')):
 	try:
 		with open(path, 'r') as f:
 			return {

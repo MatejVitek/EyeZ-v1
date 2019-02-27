@@ -15,7 +15,7 @@ import sys
 from tqdm import tqdm, trange
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-from utils import get_rot_dir
+from utils import get_eyez_dir
 
 
 # Bootstrapping parameters
@@ -25,7 +25,10 @@ ratio = 1
 # Which config to use
 cfg = 'sclera'
 
-seg_results = os.path.join(get_rot_dir(), 'Segmentation', 'Results')
+# Should precision/recall be loaded from above file(s) (True) or should it be computed anew (False)
+load_pr = True
+
+seg_results = os.path.join(get_eyez_dir(), 'Segmentation', 'Results')
 if cfg == 'vessels':
 	models = ('Miura_MC', 'Miura_RLT', 'Miura_MC_norm', 'Miura_RLT_norm', 'agt', 'segnet')
 	pred_dir = os.path.join(seg_results, 'Vessels')
@@ -33,7 +36,9 @@ if cfg == 'vessels':
 	zoom_file = os.path.join(pred_dir, 'Vessels_ROC_Zoomed.eps')
 	f1_file = os.path.join(pred_dir, 'Vessels_Scores.txt')
 	pr_file = os.path.join(pred_dir, '{}_precision_recall')
-	#colors = iter(['red', 'blue', 'green', 'black'])
+	#colors = iter([hsv_to_rgb((h, 1, 1)) for h in np.linspace(0, 1, len(models), endpoint=False)])
+	#colors = iter(matplotlib.cm.get_cmap('plasma')(np.linspace(0, 1, len(models), endpoint=False)))
+	colors = iter(['red', 'blue', 'green', 'black'])
 	legend_loc = 'upper right'
 elif cfg == 'sclera':
 	models = ('RefineNet-50', 'RefineNet-101', 'UNet', 'SegNet')
@@ -42,17 +47,14 @@ elif cfg == 'sclera':
 	zoom_file = os.path.join(pred_dir, 'Sclera_ROC_Zoomed.eps')
 	f1_file = os.path.join(pred_dir, 'Sclera_Scores.txt')
 	pr_file = os.path.join(pred_dir, '{}_precision_recall')
+	#colors = iter([hsv_to_rgb((h, 1, 1)) for h in np.linspace(0, 1, len(models), endpoint=False)])
+	#colors = iter(matplotlib.cm.get_cmap('plasma')(np.linspace(0, 1, len(models), endpoint=False)))
 	colors = iter(['red', 'blue', 'green', 'purple'])
 	legend_loc = 'lower left'
-#colors = iter([hsv_to_rgb((h, 1, 1)) for h in np.linspace(0, 1, len(models), endpoint=False)])
-#colors = iter(matplotlib.cm.get_cmap('plasma')(np.linspace(0, 1, len(models), endpoint=False)))
-
-# Should precision/recall be loaded from above file(s) (True) or should it be computed anew (False)
-load_pr = True
 
 plt.rcParams['font.family'] = 'Times New Roman'
-plt.rcParams['font.weight'] = 'roman'
-plt.rcParams['font.size'] = 24
+plt.rcParams['font.weight'] = 'normal'
+plt.rcParams['font.size'] = 22
 legend_size = 20
 plt.figure('ROC')
 plt.figure('Zoomed ROC')
@@ -76,7 +78,7 @@ def _process_file(dir, model, f):
 	gt_f = os.path.splitext(f)[0] + '_gt.png'
 	if not os.path.isfile(gt_f):
 		return None
-	
+
 	p = plt.imread(f)
 	if p.ndim > 2:
 		p = rgb2gray(p)
@@ -87,7 +89,7 @@ def _process_file(dir, model, f):
 	m = m.round().astype(int)
 	if p.shape != m.shape:
 		raise ValueError(f"Different dimensions ({p.shape} and {m.shape}) for base and GT mask in image {f}.")
-	
+
 	return FileInfo(model, f, *precision_recall_curve(m.flatten(), p.flatten()))
 
 
@@ -107,7 +109,7 @@ def find_max_f1(precision_v, recall_v):
 		if f1 > max_f1[2]:
 			max_f1 = (p, r, f1)
 	return max_f1
-	
+
 
 def rgb2gray(rgba):
 	return np.dot(rgba[...,:3], [0.2989, 0.587, 0.114])
@@ -115,7 +117,7 @@ def rgb2gray(rgba):
 
 if __name__ == '__main__':
 	info = {model: [] for model in models}
-	
+
 	if load_pr:
 		print("Loading existing precision/recall info")
 		existing = {model for model in models if os.path.isfile(pr_file.format(model))}
@@ -123,7 +125,7 @@ if __name__ == '__main__':
 			with open(pr_file.format(model), 'rb') as f:
 				info[model] = pickle.load(f)
 		models = list(set(models) - existing)
-	
+
 	print("Computing precision/recall")
 	output = [x for x in Parallel(n_jobs=-1, backend='multiprocessing')(
 		delayed(_process_file)(pred_dir, model, file)
@@ -131,9 +133,9 @@ if __name__ == '__main__':
 	) if x is not None]
 	for file in output:
 		info[file.model].append(file)
-	
+
 	print(info.keys())
-	
+
 	# Save precision and recall
 	for model in models:
 		with open(pr_file.format(model), 'wb') as f:
@@ -148,26 +150,26 @@ if __name__ == '__main__':
 			auc_ = np.empty((K, pop_size))
 			precision = np.empty((K, pop_size, interp_points))
 			recall = np.empty((K, pop_size, interp_points))
-			
+
 			for k in trange(K):
 				# Get a random sample population of size determined by ratio
 				shuffle(info[model])
 				files = info[model][:round(ratio * len(info[model]))]
-				
+
 				for i, file in tqdm(enumerate(files)):
 					# Max F1 score and its corresponding precision/recall values
 					max_f1[k, i, :] = find_max_f1(file.precision, file.recall)
-					
+
 					# AUC
 					auc_[k, i] = auc(file.recall, file.precision)
-					
+
 					# Precision/recall interpolation
 					precision[k, i, :] = interp1d(file.threshold, file.precision, fill_value='extrapolate')(np.linspace(0, 1, interp_points))
 					recall[k, i, :] = interp1d(file.threshold, file.recall, fill_value='extrapolate')(np.linspace(0, 1, interp_points))
-					
+
 			# Compute mean and std of scores
 			score.write(f"{model}: {max_f1.mean((0, 1))} \u00B1 {max_f1.std((0, 1))}, AUC {auc_.mean()} \u00B1 {auc_.std()}\n")
-			
+
 			# Plot mean and upper/lower std ROCs
 			pr = {}
 			for name, y in (('precision', precision), ('recall', recall)):
@@ -175,7 +177,7 @@ if __name__ == '__main__':
 				pr[name, 'mean'] = mean
 				pr[name, 'std1'] = mean + std
 				pr[name, 'std2'] = mean - std
-			
+
 			c = next(colors)
 			plt.figure('ROC')
 			plt.plot(pr['recall', 'mean'], pr['precision', 'mean'], label=model, linewidth=2, color=c)
@@ -186,12 +188,12 @@ if __name__ == '__main__':
 			for std in ('std1', 'std2'):
 				plt.plot(pr['recall', std], pr['precision', std], ':', linewidth=1, color=c)
 			#plt.plot(max_f1.mean((0, 1))[1], max_f1.mean((0, 1))[0], 'o', markersize=15, color=c)	
-			
+
 			# Max f1 on mean plot
 			max_f1_mean = find_max_f1(pr['precision', 'mean'], pr['recall', 'mean'])
 			plt.plot(max_f1_mean[1], max_f1_mean[0], 'o', markersize=15, color=c)
-			
-	
+
+
 	plt.figure('ROC')
 	plt.grid()
 	plt.gca().xaxis.set_major_formatter(FuncFormatter(format_bin_label))
@@ -206,7 +208,7 @@ if __name__ == '__main__':
 	plt.legend(loc=legend_loc, fontsize=legend_size)
 	plt.savefig(fig_file, bbox_inches='tight')
 	plt.tight_layout(pad=0)
-	
+
 	plt.figure('Zoomed ROC')
 	plt.grid()
 	plt.gca().xaxis.set_major_formatter(FuncFormatter(format_bin_label))
@@ -221,10 +223,10 @@ if __name__ == '__main__':
 	plt.legend(loc='upper right', fontsize=legend_size, borderpad=0.2, borderaxespad=0.2, labelspacing=0.2)
 	plt.savefig(zoom_file, bbox_inches='tight')
 	plt.tight_layout(pad=0)
-	
+
 	plt.show()
-	
-	
+
+
 '''
 The above bootstrapping computes mean and std over all pictures and all folds
 The below bootstrapping only computes mean and std over folds, first computing the mean precision/recall of all pictures in population for every fold

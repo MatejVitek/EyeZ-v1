@@ -189,11 +189,11 @@ def _process_image(fname, source, target, channels, overwrite, save_type, all_ty
 				w.writerow(mask)
 		except FileExistsError:
 			pass
-	
+
 	return counter
+				
 					
-						
 if __name__ == '__main__':
-	source = os.path.join(PATH, 'EyeZ', 'Rot', 'SBVPI', 'SBVP_vessels')
+	source = os.path.join(PATH, 'EyeZ', 'SBVPI', 'SBVP_vessels')
 	target = os.path.join(source, '..', 'SBVP_with_masks')
 	annotations_to_masks(source, target, save_type='img', plot=False, overwrite=False, logging_file='')

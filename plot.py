@@ -276,4 +276,4 @@ def scientific_tick_format(x, _):
 
 
 def exp_format(x, _):
-	return rf'$\mathregular{{10^{{{int(round(np.log10(x)))}}}}}$'
+	return rf"$\mathregular{{10^{{{int(round(np.log10(x)))}}}}}$"

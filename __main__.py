@@ -33,7 +33,7 @@ SAVE = False
 
 
 # Training and testing datasets. If no training is to be done, set train to None.
-DATA_DIR = os.path.join(utils.get_rot_dir(), 'Recognition', 'all_directions_same_id')
+DATA_DIR = os.path.join(utils.get_eyez_dir(), 'Recognition', 'Databases', 'Rot ScleraNet')
 DATA = {'train': None, 'test': 'stage2'}
 
 
@@ -69,7 +69,8 @@ def main():
 
 	models = (scleranet(), descriptor('sift'), descriptor('surf'), descriptor('orb'), descriptor('sift', True))
 	labels = ("CNN", "SIFT", "SURF", "ORB", "dSIFT")
-	results = os.path.join(utils.get_rot_dir(), 'Recognition', 'Results', 'Temp Scores.txt')
+	results_dir = os.path.join(utils.get_eyez_dir(), 'Recognition', 'Results')
+	results = os.path.join(results_dir, f'{DATA["test"]}.txt')
 
 	painter = None
 	if PLOT:
@@ -84,14 +85,20 @@ def main():
 			#	else [f"{key}" for key in test.keys()] if GROUP_BY
 			#	else [f"k = {k}" for k in range(K)]
 			#)
-			labels=labels
+			labels=labels,
+			font='Times New Roman',
+			font_size=22,
+			legend_size=20
 		)
 		painter.init()
 		painter.add_figure('EER', xlabel='Threshold', ylabel='FAR/FRR')
-		painter.add_figure('ROC Curve', save='Sclera-ROC.eps', xlabel='FAR', ylabel='TAR')
 		painter.add_figure(
-			'Semilog ROC Curve', save='Sclera-ROC-log.eps',
-			xlabel='FAR', ylabel='TAR', legend_loc='lower right',
+			'ROC Curve', save=os.path.join(results_dir, f'Sclera-ROC-{DATA["test"]}.eps'),
+			xlabel='FAR', ylabel='TAR', legend_loc='lower right'
+		)
+		painter.add_figure(
+			'Semilog ROC Curve', save=os.path.join(results_dir, f'Sclera-ROC-log-{DATA["test"]}.eps'),
+			xlabel='FAR', ylabel='TAR', legend_loc='best',
 			xscale='log', xlim=(1e-3, 1.01), xticks=(1e-3, 1e-2, 1e-1, 1), x_tick_formatter=exp_format
 		)
 
@@ -110,7 +117,7 @@ def main():
 				plot=painter,
 				closest_only=True,
 				intergroup_evaluation=INTERGROUP,
-				save=os.path.join(utils.get_rot_dir(), 'Recognition', 'Results', f'{label}.pkl'),
+				save=os.path.join(utils.get_eyez_dir(), 'Recognition', 'Results', f'{label}_{DATA["test"]}.pkl'),
 				use_precomputed=True
 			)
 			if GROUP_BY:
@@ -164,7 +171,7 @@ def resnet50(train=True):
 
 
 def scleranet(layer='final_features'):
-	model = load_model(os.path.join(utils.get_rot_dir(), 'Recognition', 'all_directions_same_id', 'models', 'id_dir_prediction.75-0.667.hdf5'))
+	model = load_model(os.path.join(utils.get_eyez_dir(), 'Recognition', 'Models', 'Rot ScleraNet', 'id_dir_prediction.75-0.667.hdf5'))
 	return base_nn_config(Model(model.input, [model.get_layer(layer).output]))
 
 
@@ -179,6 +186,12 @@ def hog(*args, **kw):
 # Too slow and doesn't work
 def correlation():
 	return DirectDistanceModel(CorrelationModel())
+
+
+#DATA_DIR = os.path.join(utils.get_eyez_dir(), 'Segmentation', 'Results', 'Vessels')
+#for data_dir in ('Miura_MC_norm',):
+#	DATA = {'train': None, 'test': data_dir}
+#	main()
 
 
 main()
