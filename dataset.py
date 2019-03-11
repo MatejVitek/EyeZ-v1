@@ -36,6 +36,9 @@ class Sample(object):
 	def __hash__(self):
 		return hash(tuple(sorted(self.__dict__.items())))
 
+	def __str__(self):
+		return f"Sample {self.basename} ({self.file})"
+
 
 class Dataset(object):
 	def __init__(self, dir=None, data=None, **kw):
