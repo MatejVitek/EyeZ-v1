@@ -6,20 +6,19 @@ import re
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-import utils
+from utils import get_eyez_dir
 
 
 PRIMARY_CHANNELS = ('periocular', 'sclera')
 SECONDARY_CHANNELS = ('canthus', 'eyelashes', 'iris', 'pupil', 'vessels')
 IMG_EXTS = ('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff')
-NEW_SIZE = (480, 360)
+NEW_SIZE = (3000, 1700)
 NAMING = r'\d+[LR]_[lrsu]_\d+'
 
 
 def main():
 	source = os.path.join(utils.get_eyez_dir(), 'Recognition', 'Databases', 'Rot ScleraNet', 'stage2')
 	target = os.path.join(utils.get_eyez_dir(), 'Resized_SegNet_Results')
-	resize(source, target, NEW_SIZE, check_for_channels=False)
 
 
 def resize(source_dir, target_dir, target_size, check_for_channels=True):
@@ -32,7 +31,7 @@ def resize(source_dir, target_dir, target_size, check_for_channels=True):
 	for dir in target_dirs:
 		os.makedirs(dir, exist_ok=True)
 	
-	Parallel(n_jobs=-1, backend='multiprocessing')(
+	Parallel(n_jobs=-1)(
 		delayed(_resize_image)(fname, source, target, target_size, check_for_channels)
 		for (source, target) in zip(source_dirs, target_dirs)
 		for fname in os.listdir(source)
@@ -67,4 +66,6 @@ def _resize_image(fname, source, target, target_size, check_for_channels):
 
 						
 if __name__ == '__main__':
-	main()
+	source = sys.argv[1] if len(sys.argv) > 1 else os.path.join(get_eyez_dir(), 'SBVPI', 'SBVPI_with_masks')
+	target = sys.argv[2] if len(sys.argv) > 2 else os.path.join(source, '..', 'Resized SBVPI', 'x'.join(str(i) for i in NEW_SIZE))
+	resize(source, target, NEW_SIZE, check_for_channels=True)

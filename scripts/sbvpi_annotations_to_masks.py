@@ -12,8 +12,10 @@ import shutil
 import subprocess
 import sys
 
+sys.path.append(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+from utils import get_eyez_dir
 
-PATH = 'D:' if platform.system().lower() == 'windows' else os.path.join('/media', os.getlogin(), 'All Your Base')
+
 PRIMARY_CHANNELS = ('periocular', 'sclera')
 SECONDARY_CHANNELS = ('canthus', 'eyelashes', 'iris', 'pupil', 'vessels')
 IMG_EXTS = ('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff')
@@ -194,6 +196,7 @@ def _process_image(fname, source, target, channels, overwrite, save_type, all_ty
 				
 					
 if __name__ == '__main__':
-	source = os.path.join(PATH, 'EyeZ', 'SBVPI', 'SBVP_vessels')
-	target = os.path.join(source, '..', 'SBVP_with_masks')
+	source = sys.argv[1] if len(sys.argv) > 1 else os.path.join(get_eyez_dir(), 'SBVPI', 'SBVPI_vessels')
+	target = sys.argv[2] if len(sys.argv) > 2 else os.path.join(source, '..', 'SBVP_with_masks')
 	annotations_to_masks(source, target, save_type='img', plot=False, overwrite=False, logging_file='')
+
