@@ -21,7 +21,7 @@ class Sample(object):
 		self.__dict__.update(naming.parse(self.basename))
 
 		#pylint: disable=no-member
-		if EXTRA_INFO:
+		if EXTRA_INFO and self.id in EXTRA_INFO:
 			self.gender = EXTRA_INFO[self.id].gender
 			self.age = EXTRA_INFO[self.id].age
 			self.color = EXTRA_INFO[self.id].color
@@ -231,12 +231,25 @@ class AttributeSplit(GPSplit):
 
 
 class BaseSplit(GPSplit):
-	def new_split(self):
+	def __init__(self, dataset, directions=4):
+		self.dirs = directions
+		super().__init__(dataset)
+
+	def new_split(self, **kw):
+		dirs = kw.get('directions', self.dirs)
 		self.dataset.shuffle()
 		gallery = []
 		probe = []
 
 		for s in self.dataset:
+			try:
+				if sum(s.label == g.label for g in gallery) >= dirs:
+					probe.append(s)
+					continue
+			except TypeError:
+				if s.direction not in dirs:
+					probe.append(s)
+					continue
 			if any(s.label == g.label and s.direction == g.direction for g in gallery):
 				probe.append(s)
 			else:

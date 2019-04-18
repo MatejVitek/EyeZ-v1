@@ -25,12 +25,12 @@ ratio = 1
 # Which config to use
 cfg = 'sclera'
 
-# Should precision/recall be loaded from above file(s) (True) or should it be computed anew (False)
+# Should precision/recall be loaded (True) or should they be computed anew (False)
 load_pr = True
 
 seg_results = os.path.join(get_eyez_dir(), 'Segmentation', 'Results')
 if cfg == 'vessels':
-	models = ('Miura_MC', 'Miura_RLT', 'Miura_MC_norm', 'Miura_RLT_norm', 'agt', 'segnet')
+	models = ('Coye', 'B-COSFIRE') #, 'Miura_MC', 'Miura_RLT', 'Miura_MC_norm', 'Miura_RLT_norm', 'agt', 'segnet')
 	pred_dir = os.path.join(seg_results, 'Vessels')
 	fig_file = os.path.join(pred_dir, 'Vessels_ROC.eps')
 	zoom_file = os.path.join(pred_dir, 'Vessels_ROC_Zoomed.eps')
@@ -54,8 +54,8 @@ elif cfg == 'sclera':
 
 plt.rcParams['font.family'] = 'Times New Roman'
 plt.rcParams['font.weight'] = 'normal'
-plt.rcParams['font.size'] = 22
-legend_size = 20
+plt.rcParams['font.size'] = 32
+legend_size = 24
 plt.figure('ROC')
 plt.figure('Zoomed ROC')
 
@@ -128,17 +128,19 @@ if load_pr:
 print("Computing precision/recall")
 output = [x for x in Parallel(n_jobs=-1)(
 	delayed(_process_file)(pred_dir, model, file)
-	for model, file in itertools.chain.from_iterable(itertools.product([model], os.listdir(os.path.join(pred_dir, model))) for model in models)
+	for model in models
+	for file in os.listdir(os.path.join(pred_dir, model))
 ) if x is not None]
 for file in output:
 	info[file.model].append(file)
 
 print(info.keys())
 
+# FIXME: Why is this not working?
 # Save precision and recall
-for model in models:
-	with open(pr_file.format(model), 'wb') as f:
-		pickle.dump(info[model], f)
+#for model in models:
+#	with open(pr_file.format(model), 'wb') as f:
+#		pickle.dump(info[model], f)
 
 print("Computing means and stds")
 with open(f1_file, 'w') as score:
@@ -243,7 +245,8 @@ if load_pr:
 print("Computing precision/recall")
 output = [x for x in Parallel(n_jobs=-1, backend='multiprocessing')(
 	delayed(_process_file)(pred_dir, model, file)
-	for model, file in itertools.chain.from_iterable(itertools.product([model], os.listdir(os.path.join(pred_dir, model))) for model in models)
+	for model in models
+	for file in os.listdir(os.path.join(pred_dir, model))
 ) if x is not None]
 for file in output:
 	info[file.model].append(file)

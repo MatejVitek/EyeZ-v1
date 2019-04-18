@@ -10,10 +10,12 @@ from dataset import Dataset
 
 
 class ImageGenerator(Sequence):
-	def __init__(self, data, target_size=(256, 256), color_mode='rgb', batch_size=32, shuffle=True):
+	def __init__(self, data, target_size=(256, 256), color_mode='rgb', squeeze_dims=False, flatten=False, batch_size=32, shuffle=True):
 		self.data = data
 		self.target_size = target_size
 		self.cmap = color_mode
+		self.squeeze = squeeze_dims
+		self.flatten = flatten
 		self.batch_size = batch_size
 		self.batch = None
 		self.shuffle = shuffle
@@ -37,13 +39,22 @@ class ImageGenerator(Sequence):
 	def _read_sample(self, i, sample):
 		self.batch[i] = self._load_img(sample.file)
 
-	def _load_img(self, f, target_size=None, color_mode=None):
+	def _load_img(self, f, target_size=None, color_mode=None, squeeze=None, flatten=None):
 		if not target_size:
 			target_size = self.target_size
 		if not color_mode:
 			color_mode = self.cmap
+		if squeeze is None:
+			squeeze = self.squeeze
+		if flatten is None:
+			flatten = self.flatten
 		x = image.load_img(f, target_size=target_size, color_mode=color_mode)
-		return image.img_to_array(x) / 255
+		x = image.img_to_array(x) / 255
+		if flatten:
+			x = x.reshape((x.shape[0] * x.shape[1]), 3 if color_mode == 'rgb' else 1)
+		if squeeze:
+			x = np.squeeze(x)
+		return x
 
 	def on_epoch_end(self):
 		if self.shuffle:
@@ -83,10 +94,22 @@ class ImageTupleGenerator(ImageGenerator):
 
 		if isinstance(self.cmap, str):
 			self.cmap = [self.cmap] * len(self.datasets)
-		assert len(self.cmap) == len(self.datasets)
+		if len(self.cmap) != len(self.datasets):
+			raise ValueError(f"Length of cmap ({len(self.cmap)}) not equal to number of datasets ({len(self.datasets)}).")
+		if isinstance(self.squeeze, bool):
+			self.squeeze = [self.squeeze] * len(self.datasets)
+		if len(self.squeeze) != len(self.datasets):
+			raise ValueError(f"Length of squeeze ({len(self.squeeze)}) not equal to number of datasets ({len(self.datasets)}).")
+		if isinstance(self.flatten, bool):
+			self.flatten = [self.flatten] * len(self.datasets)
+		if len(self.flatten) != len(self.datasets):
+			raise ValueError(f"Length of flatten ({len(self.flatten)}) not equal to number of datasets ({len(self.datasets)}).")
 
 	def _init_batch(self, size):
-		self.batch = tuple(np.empty((size, *self.target_size, 1 if c == 'grayscale' else 3), dtype=float) for c in self.cmap)
+		img_sizes = [(self.target_size[0] * self.target_size[1],) if flatten else self.target_size for flatten in self.flatten]
+		img_sizes = [img_size + ((3,) if cmap == 'rgb' else (1,)) for img_size, cmap in zip(img_sizes, self.cmap)]
+		img_sizes = [tuple(x for x in img_size if x != 1) if squeeze else img_size for img_size, squeeze in zip(img_sizes, self.squeeze)]
+		self.batch = tuple(np.empty((size, *img_size), dtype=float) for img_size in img_sizes)
 
 	def _read_batch(self, start):
 		for d, dataset in enumerate(self.datasets):
@@ -94,7 +117,7 @@ class ImageTupleGenerator(ImageGenerator):
 				self._read_sample(d, i, sample)
 
 	def _read_sample(self, d, i, sample):
-		self.batch[d][i] = self._load_img(sample.file, color_mode=self.cmap[d])
+		self.batch[d][i] = self._load_img(sample.file, color_mode=self.cmap[d], squeeze=self.squeeze[d], flatten=self.flatten[d])
 
 	def on_epoch_end(self):
 		if self.shuffle:

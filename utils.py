@@ -20,6 +20,10 @@ def multi_replace(string, replacements, ignore_case=False):
 	return pattern.sub(lambda match: replacements[match.group(0)], string)
 
 
+def alphanum(s):
+	return re.sub(r'[^0-9a-zA-Z]', '', s)
+
+
 def get_eyez_dir():
 	pc_name = socket.gethostname()
 	for disk in (WINDOWS[pc_name] if platform.system().lower() == 'windows' else UNIX[pc_name]):
@@ -35,7 +39,7 @@ class Info:
 		self.color = color
 
 
-def get_id_info(path=os.path.join(get_eyez_dir(), 'SBVPI', 'SBVP_Gender_Age_Color.txt')):
+def get_id_info(path=os.path.join(get_eyez_dir(), 'SBVPI', 'SBVPI_Gender_Age_Color.txt')):
 	try:
 		with open(path, 'r') as f:
 			return {

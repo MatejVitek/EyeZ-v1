@@ -58,16 +58,15 @@ def _process_image(image, src, tgt):
 				pass
 
 
-if __name__ == '__main__':
-	if len(sys.argv) > 1:
-		split(*sys.argv)
-	else:
-		args = [None] * 6
-		args[0] = os.path.join(get_eyez_dir(), 'Segmentation', 'Databases', 'Sclera', 'SSBC2019 + SBVPI', 'Images')
-		args[1] = os.path.join(args[0], '..', 'train', 'Images')
-		args[2] = os.path.join(args[0], '..', 'val', 'Images')
-		args[3] = os.path.join(args[0], '..', 'Masks')
-		args[4] = os.path.join(args[0], '..','train', 'Masks')
-		args[5] = os.path.join(args[0], '..','val', 'Masks')
-		split(*args)
+if len(sys.argv) > 1:
+	split(*sys.argv[1:])
+else:
+	args = [None] * 6
+	args[0] = os.path.join(get_eyez_dir(), 'Segmentation', 'Databases', 'Sclera', 'SSBC2019 + SBVPI', 'Images')
+	args[1] = os.path.join(args[0], '..', 'train', 'Images')
+	args[2] = os.path.join(args[0], '..', 'val', 'Images')
+	args[3] = os.path.join(args[0], '..', 'Masks')
+	args[4] = os.path.join(args[0], '..','train', 'Masks')
+	args[5] = os.path.join(args[0], '..','val', 'Masks')
+	split(*args)
 

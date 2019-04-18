@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
+# Best structure 5 April 2019
+
+from ast import literal_eval
 from joblib import Parallel, delayed
+import numpy as np
 import os
 from PIL import Image
 import re
@@ -12,60 +16,68 @@ from utils import get_eyez_dir
 PRIMARY_CHANNELS = ('periocular', 'sclera')
 SECONDARY_CHANNELS = ('canthus', 'eyelashes', 'iris', 'pupil', 'vessels')
 IMG_EXTS = ('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff')
-NEW_SIZE = (3000, 1700)
 NAMING = r'\d+[LR]_[lrsu]_\d+'
 
 
-def main():
-	source = os.path.join(utils.get_eyez_dir(), 'Recognition', 'Databases', 'Rot ScleraNet', 'stage2')
-	target = os.path.join(utils.get_eyez_dir(), 'Resized_SegNet_Results')
+# Defaults
+SIZE = (3000, 1700)
+SRC = os.path.join(get_eyez_dir(), 'SBVPI', 'SBVPI_with_masks')
 
 
-def resize(source_dir, target_dir, target_size, check_for_channels=True):
-	if not os.path.isdir(source_dir):
-		raise ValueError(f"{source_dir} is not a directory.")
-
-	cls_dirs = [i for i in os.listdir(source_dir) if os.path.isdir(os.path.join(source_dir, i))]
-	source_dirs = [os.path.join(source_dir, cls_dir) for cls_dir in cls_dirs]
-	target_dirs = [os.path.join(target_dir, cls_dir) for cls_dir in cls_dirs]
-	for dir in target_dirs:
-		os.makedirs(dir, exist_ok=True)
+def resize(size=SIZE, source=SRC, target=None, check_for_channels=True, convert_original=False):
+	if isinstance(size, str):
+		size = literal_eval(size)
+	if not os.path.isdir(source):
+		raise ValueError(f"{source} is not a directory.")
+	if not target:
+		target = os.path.join(source, '..', 'Resized', 'x'.join(str(i) for i in size))
+	if isinstance(check_for_channels, str):
+		check_for_channels = literal_eval(check_for_channels)
+	if isinstance(convert_original, str):
+		convert_original = literal_eval(convert_original)
 	
 	Parallel(n_jobs=-1)(
-		delayed(_resize_image)(fname, source, target, target_size, check_for_channels)
-		for (source, target) in zip(source_dirs, target_dirs)
-		for fname in os.listdir(source)
+		delayed(_process_file)(root, file, source, target, size, check_for_channels, convert_original)
+		for root, _, files in os.walk(source)
+		for file in files
 	)
 
 
-def _resize_image(fname, source, target, target_size, check_for_channels):
-	f = os.path.join(source, fname)
+def _process_file(root, fname, source, target, size, check_for_channels, convert_original):
+	f = os.path.join(root, fname)
 	basename, ext = os.path.splitext(fname)
 	if not os.path.isfile(f) or ext.lower() not in IMG_EXTS or not re.fullmatch(NAMING, basename):
 		return
 	
 	print(f"Processing file: {fname}")
-	img = Image.open(f)
-	img = img.resize(target_size, resample=Image.LANCZOS)
-	img.save(os.path.join(target, fname))
+	tgt_root = os.path.join(target, os.path.relpath(root, source))
+	os.makedirs(tgt_root, exist_ok=True)
+	
+	_resize(size, f, os.path.join(tgt_root, fname), convert=convert_original)
 	if not check_for_channels:
 		return
 
 	for channel in PRIMARY_CHANNELS + SECONDARY_CHANNELS:
 		for ext in IMG_EXTS:
 			fname = f'{basename}_{channel}{ext}'
-			f = os.path.join(source, fname)
+			f = os.path.join(root, fname)
 			if not os.path.isfile(f):
 				continue
 
 			print(f"Processing file: {fname}")
-			img = Image.open(f)
-			img = img.resize(target_size, resample=Image.NEAREST)
-			img.save(os.path.join(target, fname))
+			_resize(size, f, os.path.join(tgt_root, fname), convert=True)
 			break
+			
+			
+def _resize(size, src_f, tgt_f, convert=False):
+	img = Image.open(src_f)
+	resampler = Image.LANCZOS if all(new_size <= old_size for new_size, old_size in zip(size, img.size)) else Image.BICUBIC
+	img = img.resize(size, resample=resampler)
+	if convert:
+		img = img.convert('L').point(lambda x: 255 if x >= 128 else 0, mode='1')
+	img.save(tgt_f)
 
-						
+
+# Should include this check in case I ever want to import anything from this module
 if __name__ == '__main__':
-	source = sys.argv[1] if len(sys.argv) > 1 else os.path.join(get_eyez_dir(), 'SBVPI', 'SBVPI_with_masks')
-	target = sys.argv[2] if len(sys.argv) > 2 else os.path.join(source, '..', 'Resized SBVPI', 'x'.join(str(i) for i in NEW_SIZE))
-	resize(source, target, NEW_SIZE, check_for_channels=True)
+	resize(*sys.argv[1:])

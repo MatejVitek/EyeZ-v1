@@ -21,11 +21,20 @@ class Evaluation(object):
 
 	def compute_error_rates(self, dist_matrix, g_classes, p_classes, **kw):
 		closest_only = kw.get('closest_only', False)
-		imp_matrix = kw.get('impostor_matrix') or dist_matrix
-		imp_classes = kw.get('impostor_classes') or p_classes
+		imp_matrix = kw.get('impostor_matrix')
+		if imp_matrix is None:
+			imp_matrix = dist_matrix
+		imp_classes = kw.get('impostor_classes')
+		if imp_classes is None:
+			imp_classes = p_classes
 		n_points = kw.get('n_points', 5000)
-
-		self._threshold = np.linspace(dist_matrix.min(), dist_matrix.max(), n_points)#np.unique(dist_matrix)
+		
+		if n_points == 'unique':
+			self._threshold = np.unique(dist_matrix)
+		else:
+			self._threshold = np.linspace(dist_matrix.min(), dist_matrix.max(), n_points)
+		# Edge case handling
+		self._threshold = np.unique(np.concatenate(([-1e-8], self._threshold, [1.])))
 
 		same = self._same(dist_matrix, g_classes, p_classes, closest_only)
 		diff = self._diff(imp_matrix, g_classes, imp_classes, closest_only)
@@ -49,12 +58,12 @@ class Evaluation(object):
 		return eer_
 
 	def update_ver1far(self):
-		ver = ver_at_far(self._far, self._tar, self._threshold, 0.01)
+		ver = ver_at_far(self._far, self._tar, 0.01)
 		self.ver1far.update(ver)
 		return ver
 
 	def update_ver01far(self):
-		ver = ver_at_far(self._far, self._tar, self._threshold, 0.001)
+		ver = ver_at_far(self._far, self._tar, 0.001)
 		self.ver01far.update(ver)
 		return ver
 
@@ -145,12 +154,15 @@ def eer(far, frr, x):
 	)
 
 
-def ver_at_far(far, tar, x, far_point=0.01):
+def ver_at_far(far, tar, far_point=0.01):
 	try:
 		i = np.argwhere(np.diff(np.sign(far - far_point))).flatten()[0]
 	except IndexError:
 		# No intersection
 		return 0.
+	if far_point < .9 and far[i+1] == 1.:
+		# Edge case where FAR just jumps to 1
+		return tar[i]
 
-	alpha = (far_point - x[i]) / (x[i+1] - x[1])
-	return alpha * tar[i] + (1 - alpha) * tar[i+1]
+	alpha = (far_point - far[i]) / (far[i+1] - far[i])
+	return (1 - alpha) * tar[i] + alpha * tar[i+1]

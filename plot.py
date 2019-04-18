@@ -60,9 +60,18 @@ class Figure(object):
 			self.finalize()
 
 	def finalize(self):
-		if self.settings.get('save'):
+		self.save()
+		self.close()
+
+	def save(self):
+		save = self.settings.get('save')
+		if save:
+			print(f"Saving figure to {save}.")
 			plt.figure(self.name)
-			plt.savefig(self.settings.get('save'), bbox_inches='tight')
+			plt.savefig(save, bbox_inches='tight')
+
+	def close(self):
+		plt.close(self.name)
 
 	def plot(self, x, y, **kw):
 		"""
@@ -121,7 +130,7 @@ class Figure(object):
 
 
 class Painter(object):
-	def __init__(self, colors='hsv', labels=None, k=None, interactive=True, **kw):
+	def __init__(self, colors='hsv', labels=None, k=None, interactive=True, pause_on_end=True, **kw):
 		"""
 		Class for drawing multiple plots to a figure (or multiple figures)
 
@@ -130,6 +139,7 @@ class Painter(object):
 		:param k: Number of colors to sample from the colormap. If None, the entire colormap will be used.
 		:type  k: int or None
 		:param bool interactive: Should execution continue after drawing
+		:param bool pause_on_end: Should execution halt when Painter is finalised (ignored if interactive is False)
 		:param kw: Default settings for all figures (see :py:Figure)
 		"""
 
@@ -138,6 +148,7 @@ class Painter(object):
 		self.labels = labels
 		self.k = k
 		self.interactive = interactive
+		self.pause = pause_on_end
 		self.default_settings = kw
 
 	def __call__(self, *args, **kw):
@@ -176,10 +187,13 @@ class Painter(object):
 
 	def finalize(self):
 		for figure in self:
-			figure.finalize()
+			figure.save()
 		if self.interactive:
 			plt.ioff()
-			plt.show()
+			if self.pause:
+				plt.show()
+		for figure in self:
+			figure.close()
 
 	def add_figure(self, figure=None, colors=None, labels=0, k=0, **kw):
 		"""

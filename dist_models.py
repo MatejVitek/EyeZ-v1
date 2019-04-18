@@ -7,7 +7,7 @@ import scipy.signal
 
 
 class DistModel(ABC):
-	def __init__(self, cache_size=100, image_size=(256, 256)):
+	def __init__(self, cache_size=100, image_size=(400, 400)):
 		self.size = cache_size
 		if self.size < 2:
 			raise ValueError("cache_size needs to be at least 2")
@@ -27,6 +27,8 @@ class DistModel(ABC):
 
 	def _cache_value(self, f):
 		img = cv2.imread(f, cv2.IMREAD_GRAYSCALE)
+		if img.shape[:2] == self.image_size[::-1]:
+			return img
 		return cv2.resize(img, self.image_size)
 
 	@abstractmethod
@@ -35,8 +37,8 @@ class DistModel(ABC):
 
 
 class DescriptorModel(DistModel):
-	def __init__(self, descriptor='sift', dense=False, *args, cache_size=1000, **kw):
-		super().__init__(cache_size=cache_size)
+	def __init__(self, descriptor='sift', dense=False, *args, cache_size=1000, image_size=(400, 400), **kw):
+		super().__init__(cache_size=cache_size, image_size=image_size)
 
 		#pylint: disable=no-member
 		if descriptor.lower() == 'sift':
@@ -48,23 +50,31 @@ class DescriptorModel(DistModel):
 		else:
 			raise ValueError(f"Unsupported descriptor algorithm {descriptor}.")
 
-		self.dense = dense
+		self.grid_step = dense
+		if self.grid_step is True:
+			self.grid_step = int(np.sqrt(np.mean(self.image_size)))
 		self.matcher = cv2.BFMatcher()
 
 	def _cache_value(self, f):
 		img = super()._cache_value(f)
-		if not self.dense:
+
+		# Detected keypoints
+		if not self.grid_step:
 			return self.alg.detectAndCompute(img, None)[1]
-		step = 10 if self.dense is True else self.dense
-		kp = [cv2.KeyPoint(x, y, step) for y in range(0, img.shape[0], step) for x in range(0, img.shape[1], step)]
-		return self.alg.compute(img, kp)[1]
+
+		# Dense grid keypoints
+		return self.alg.compute(img, [
+			cv2.KeyPoint(x, y, self.grid_step)
+			for y in range(0, img.shape[0], self.grid_step)
+			for x in range(0, img.shape[1], self.grid_step)
+		])[1]
 
 	def _dist(self, des1, des2):
 		if des1 is None or len(des1) == 0 or des2 is None or len(des2) == 0:
-			return 1.
+			return np.nan
 		matches = self.matcher.knnMatch(des1, des2, k=2)
 		good = [m[0] for m in matches if len(m) > 1 and m[0].distance < 0.75 * m[1].distance]
-		#return sum(m.distance for m in good) / len(good) if good else 1.
+		#return sum(m.distance for m in good) / len(good) if good else np.nan
 		return 1 - (len(good) / len(matches))
 
 

@@ -27,7 +27,7 @@ class CV:
 		else:
 			return self.cross_validate(train, test, *args, **kw)
 
-	def cross_validate(self, train, test, k=10, plot=False, evaluation=None, **kw):
+	def cross_validate(self, train, test, k=10, base_split_n=4, plot=False, evaluation=None, save=None, **kw):
 		"""
 		Cross validate model
 
@@ -36,10 +36,14 @@ class CV:
 		:param test: Dataset to test on
 		:type  test: Dataset or GPSplit
 		:param int k: Number of folds
+		:param int base_split_n: Number of view directions to put into gallery
 		:param plot: Painter object to use or boolean value
 		:type  plot: Painter or bool or None
 		:param evaluation: If specified, will use this as the pre-existing evaluation
 		:type  evaluation: Evaluation or None
+		:param save: File to save distance matrix info to.
+		             If current fold number should be formatted in, this should include the string {fold}.
+		:type  save: str or None
 		:param kw: Additional arguments to pass to :py:CVModel.evaluate
 
 		:return: Final evaluation
@@ -70,7 +74,7 @@ class CV:
 
 		# If test is passed as a Dataset, split into base set and verification attempts
 		if isinstance(test, Dataset):
-			test = BaseSplit(test)
+			test = BaseSplit(test, base_split_n)
 
 		for fold in range(k):
 			print(f"Fold {fold+1}:")
@@ -81,7 +85,13 @@ class CV:
 				self.model.train(train_data, val_data)
 
 			test.new_split()
-			evaluation = self.model.evaluate(test.gallery, test.probe, evaluation=evaluation, plot=plot, **kw)
+			evaluation = self.model.evaluate(
+				test.gallery, test.probe,
+				evaluation=evaluation,
+				plot=plot,
+				save=save.format(fold=fold+1) if '{fold}' in save else save,
+				**kw
+			)
 
 			if train:
 				self.model.reset()
@@ -97,13 +107,16 @@ class CV:
 
 		return evaluation
 
-	def cross_validate_grouped(self, train, test, *args, **kw):
+	def cross_validate_grouped(self, train, test, *args, save=None, **kw):
 		"""
 		Cross validate a grouped dataset
 
 		:param train: Dictionary of training groups. If None, no training will be done.
 		:param test: Dictionary of testing groups. If train was specified, both should be of the same length.
 		:param args: Additional args to pass to :py:cross_validate
+		:param save: File to save distance matrix info to.
+		             If current group should be formatted in, this should include the string {group}.
+		:type  save: str or None
 		:param bool intergroup_evaluation: Whether to use samples from different groups for impostor testing
 		:param kw: Additional keyword args to pass to :py:cross_validate
 
@@ -112,7 +125,7 @@ class CV:
 
 		inter_eval = kw.pop('intergroup_evaluation', False)
 
-		impostors = None
+		impostors = {}
 		if inter_eval:
 			impostors = {
 				label: sum((d for d in test.values() if d != dataset), Dataset(data=[]))
@@ -125,6 +138,13 @@ class CV:
 		evaluation = {}
 		for label in test:
 			print(label)
-			evaluation[label] = self.cross_validate(train.get(label), test[label], *args, impostors=impostors.get(label), **kw)
+			evaluation[label] = self.cross_validate(
+				train.get(label),
+				test[label],
+				*args,
+				save=save.format(group=utils.alphanum(label)) if '{group}' in save else save,
+				impostors=impostors.get(label),
+				**kw
+			)
 
 		return evaluation

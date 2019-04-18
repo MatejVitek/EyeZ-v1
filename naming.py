@@ -7,7 +7,7 @@ import utils
 
 L = (dataset.L, 'left', 'Left', 'LEFT', 'l', 'L')
 R = (dataset.R, 'right', 'Right', 'RIGHT', 'r', 'R')
-C = (dataset.C, 'center', 'Center', 'CENTER', 'c', 'C')
+C = (dataset.C, 'center', 'Center', 'CENTER', 'c', 'C', 's', 'S')
 U = (dataset.U, 'up', 'Up', 'UP', 'u', 'U')
 
 

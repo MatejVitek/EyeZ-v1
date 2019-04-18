@@ -160,6 +160,10 @@ class DirectDistanceModel(CVModel):
 		for g, p in dm_idx:
 			dist_matrix[g, p] = self.model.distance(gallery[g], probe[p])
 
+		m = np.nanmax(dist_matrix)
+		m = 1 if np.isnan(m) or m <= 1 else m + 1e-8
+		dist_matrix[np.isnan(dist_matrix)] = m
+
 		return dist_matrix
 
 
@@ -216,7 +220,9 @@ class PredictorModel(CVModel):
 		return self._dist_matrix(g_features, p_features)
 
 	def _dist_matrix(self, g_features, p_features):
-		return sp.spatial.distance.cdist(g_features, p_features, metric=self.dist)
+		dist_matrix = sp.spatial.distance.cdist(g_features, p_features, metric=self.dist)
+		dist_matrix[np.isnan(dist_matrix)] = 1.
+		return dist_matrix
 
 	def predict(self, data, name="unknown"):
 		self._print(f"Predicting {name} features:")
@@ -317,17 +323,17 @@ class TrainablePredictorModel(PredictorModel):
 			# Freeze base layers
 			for layer in self.base.layers:
 				layer.trainable = False
-			print("Training top layers:")
+			self._print("Training top layers:")
 			self._fit_model(t_gen, v_gen, epochs=self.epochs1, opt=self.opt1, loss='categorical_crossentropy')
 
 			# Unfreeze the last few base layers
 			for layer in self.base.layers[self.first_unfreeze:]:
 				layer.trainable = True
-			print("Training unfrozen layers:")
+			self._print("Training unfrozen layers:")
 			self._fit_model(t_gen, v_gen, epochs=self.epochs2, opt=self.opt2, loss='categorical_crossentropy')
 
 		else:
-			print("Training model:")
+			self._print("Training model:")
 			self._fit_model(t_gen, v_gen, epochs=self.epochs1, opt=self.opt1, loss='categorical_crossentropy')
 
 	def _fit_model(self, t_gen, v_gen, epochs, opt='SGD', loss='categorical_crossentropy'):
