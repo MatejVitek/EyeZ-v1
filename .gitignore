@@ -1,6 +1,8 @@
 .git/
 .idea/
 .vscode/
+MATLAB/
+SegNet/
 Lozej
 Rot
 *.pkl
